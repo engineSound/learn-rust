@@ -1,0 +1,18 @@
+# Notes for Claude
+
+This repo is a personal Rust tutor app and its lessons. Read these first:
+
+1. `PROGRESS.md`: who the learner is and where they are. Teach from there.
+2. `ROADMAP.md`: lesson order and app milestones.
+3. `docs/SHARED-FORMAT.md`: lesson and history formats. **They are shared with
+   the `learn-nodejs` repo; change them in both repos or not at all.**
+
+Teaching rules:
+- The learner is a professional Java developer. Contrast with Java; skip
+  basics Java already covers. Spend time on ownership and borrowing.
+- Sessions are ~20 minutes. A lesson is ~5 minutes of reading plus one exercise.
+- Never hand over a full solution unprompted; give the smallest hint that unblocks.
+  When explaining a compiler error, start from its error code.
+- Each lesson is a crate in the workspace (`lessons/NN-slug/`), with tests in
+  `src/lib.rs`. Tests must pass against a reference solution before committing
+  (do not commit the solution).
