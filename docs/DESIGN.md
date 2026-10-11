@@ -8,18 +8,27 @@ everything so a tutor (Claude) can adapt to me.
 ## Parts
 
 ```
-browser ──► Axum server ──► runner (cargo test in a lesson crate, 60 s timeout)
+browser ──► std-only HTTP server ──► runner (cargo test in a lesson copy, 120 s timeout)
                  │
                  ├──► SQLite: data/history.db  (event log, see SHARED-FORMAT.md)
                  ├──► profile builder → data/profile.md
                  └──► tutor: Claude API (profile + lesson + my code + compiler output)
 ```
 
-- **Web UI:** server-rendered pages plus a code editor (CodeMirror). No JS build step.
-- **Runner:** copies the lesson crate to a scratch directory, writes my code,
-  runs `cargo test --message-format=json` with a shared target directory so
-  rebuilds take seconds, and returns errors (with codes like `E0382`) and
-  test results as JSON.
+- **No dependencies.** The server (`app/src/`) uses only the standard
+  library: a small HTTP server, a JSON writer, the lesson loader and the
+  runner. No crates to download, fast to build. (Axum and Tokio come later as
+  lessons, not as plumbing.)
+- **Web UI** (`app/public/`, shared with `learn-nodejs`): plain HTML, CSS and
+  JS. A textarea editor with line numbers, a small Markdown renderer for
+  lessons, and a results panel. Works offline.
+- **Runner** (`app/src/runner.rs`): copies the lesson to
+  `data/runs/<slug>/`, writes my code into the `edit:` file, and runs
+  `cargo test` with a shared `data/target/`, so rebuilds take about a second.
+  It parses compiler errors (keeping codes like `E0382`, dropping warnings)
+  and libtest results into JSON. One run at a time.
+- **Server** (`app/src/main.rs`): the API in `docs/SHARED-FORMAT.md`.
+  Listens on 127.0.0.1 only unless `HOST` is set.
 - **History:** append-only `events` table; everything else is derived.
   Compiler error codes are stored with each `fail` event, because repeated
   codes are the clearest sign of what to review.
@@ -30,7 +39,7 @@ browser ──► Axum server ──► runner (cargo test in a lesson crate, 60
   (`ANTHROPIC_API_KEY`), never committed.
 
 ## Running it
-- **Mac (now):** `cargo run -p app`, open http://localhost:3001.
+- **Mac (now):** `cargo run`, open http://localhost:3001.
 - **AWS (later):** the same app in a Docker container (with the Rust
   toolchain) on an existing EC2 instance, behind HTTPS and a login, because it
   compiles and runs code.

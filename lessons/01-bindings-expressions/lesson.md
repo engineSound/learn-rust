@@ -6,6 +6,7 @@ minutes: 20
 concepts: [cargo, let-mut, shadowing, expressions, integer-types]
 prereqs: []
 contrast: java
+edit: src/lib.rs
 ---
 
 # Bindings and expressions

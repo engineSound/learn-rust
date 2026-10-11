@@ -10,24 +10,31 @@ so they can merge into one multi-language tutor later.
 ## Status
 
 - [x] Lesson format, history format, roadmap
-- [x] Lesson 01 (works from the command line today)
-- [ ] Web app: lesson list, editor, Run button → compiler and test results
+- [x] Lesson 01
+- [x] Web app (M1): lesson list, editor, Run button → compiler errors and test results in about a second
 - [ ] History database + learner profile
 - [ ] Tutor (Claude API) reading the profile
 - [ ] Docker setup; deploy to AWS
 
-## Doing a lesson today, before the app exists
+## Start the app
 
-Needs Rust via [rustup](https://rustup.rs).
+Needs Rust via [rustup](https://rustup.rs). There are no crates to download:
+the app uses only the standard library.
 
 ```sh
-cd lessons/01-bindings-expressions
-cat lesson.md            # read (~5 min)
-$EDITOR src/lib.rs       # replace each todo!()
-cargo test               # repeat until green; read the compiler errors closely
+cargo run                # then open http://localhost:3001
 ```
 
-Then add a line to [PROGRESS.md](PROGRESS.md).
+Pick a lesson, read it on the left, write code on the right, and press
+**Ctrl+Enter** (or **⌘+Enter**) to compile and run the tests. Compiler errors
+appear with their codes (like `E0308`). Your code is saved as you type, in
+`data/work/` (not committed). After a lesson, add a line to
+[PROGRESS.md](PROGRESS.md).
+
+`cargo test` at the repo root tests the app itself (lesson tests are meant to
+fail until you solve them).
+
+Without the app: `cd lessons/01-bindings-expressions && cargo test`.
 
 ## Docs
 

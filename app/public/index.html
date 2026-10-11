@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Learn</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><span class="dot"></span><span id="track-title">Learn</span></div>
+  <label class="picker">
+    <span class="sr">Lesson</span>
+    <select id="lesson-select"></select>
+  </label>
+  <div class="actions">
+    <button id="reset-btn" class="ghost" type="button" title="Replace your code with the starter code">Reset</button>
+    <button id="run-btn" type="button" title="Run the tests (Ctrl+Enter / Cmd+Enter)">Run tests</button>
+  </div>
+</header>
+
+<main class="layout">
+  <article id="lesson" class="lesson" aria-label="Lesson text">
+    <p class="muted">Loading lessons…</p>
+  </article>
+
+  <section class="work" aria-label="Your code and results">
+    <div class="file-tab">
+      <span id="file-name" class="mono">exercise</span>
+      <span id="save-state" class="muted small" role="status"></span>
+    </div>
+    <div class="editor">
+      <pre id="gutter" class="gutter" aria-hidden="true">1</pre>
+      <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Code editor"></textarea>
+    </div>
+    <div id="results" class="results" aria-live="polite">
+      <p class="muted">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (or <kbd>⌘</kbd>+<kbd>Enter</kbd>) to run the tests.</p>
+    </div>
+  </section>
+</main>
+
+<script src="/markdown.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

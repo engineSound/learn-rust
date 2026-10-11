@@ -25,6 +25,7 @@ minutes: 20                    # target length of one short daily session
 concepts: [equality, let-const, arrow-functions, array-methods]
 prereqs: []                    # lesson ids
 contrast: java                 # language the explanation compares against
+edit: exercise.js              # the file the learner edits (Rust: src/lib.rs)
 ```
 
 `concepts` are the unit the tutor tracks. Name them in lowercase kebab-case
@@ -32,7 +33,27 @@ and reuse names across tracks when the idea is the same (e.g. `closures`,
 `error-handling`, `async`). That reuse is how a future merged app notices
 "you learned this in Node; here's the Rust version."
 
-## 2. History format
+## 2. App API and front end
+
+Both apps serve the same JSON API, and `app/public/` (the browser UI) is
+**byte-for-byte identical** in both repos. Change it in both or neither.
+
+| Method and path | Body | Returns |
+|-----------------|------|---------|
+| `GET /api/info` | | `{ track, title, accent }` |
+| `GET /api/lessons` | | `[{ slug, id, title, minutes, concepts }]` |
+| `GET /api/lessons/:slug` | | `{ slug, meta, body, file, code, saved }` |
+| `PUT /api/lessons/:slug/code` | code as plain text | `{ saved: true }` |
+| `DELETE /api/lessons/:slug/code` | | `{ code }` (the starter) |
+| `POST /api/lessons/:slug/run` | code as plain text | run result (below) |
+
+Run result: `{ passed, failed, total, tests: [{ name, ok, message }],
+compileErrors: [{ code, title, message }], timedOut, durationMs, output }`.
+`compileErrors[].code` is a compiler error code such as `E0308`, or `null`.
+
+The learner's code is saved to `data/work/<slug>/<edit file>` (gitignored).
+
+## 3. History format
 
 One append-only event log, stored in SQLite (`data/history.db`):
 
@@ -56,7 +77,7 @@ Everything else (mastery, review schedule, the learner profile) is
 **derived** from events and can be rebuilt at any time. Merging the two apps
 later means concatenating two event tables.
 
-## 3. Learner profile
+## 4. Learner profile
 
 Regenerated after each session from the events and saved as
 `data/profile.md`. The tutor reads it at the start of every session. It holds:
@@ -69,7 +90,7 @@ Review timing uses spaced repetition, as in language learning: each
 successful recall pushes the next review further out (1, 3, 7, 16, 35 days),
 and a failure resets it.
 
-## 4. Session shape (under 3 h/week, short daily sessions)
+## 5. Session shape (under 3 h/week, short daily sessions)
 
 A ~20 minute session:
 

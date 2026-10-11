@@ -13,6 +13,9 @@ Teaching rules:
 - Sessions are ~20 minutes. A lesson is ~5 minutes of reading plus one exercise.
 - Never hand over a full solution unprompted; give the smallest hint that unblocks.
   When explaining a compiler error, start from its error code.
+- App: `app/` (std-only web server; keep it dependency-free unless there's a
+  strong reason). `app/public/` is shared byte-for-byte with `learn-nodejs`.
+  Check with `cargo test` at the root, then `cargo run` and try a lesson.
 - Each lesson is a crate in the workspace (`lessons/NN-slug/`), with tests in
   `src/lib.rs`. Tests must pass against a reference solution before committing
   (do not commit the solution).

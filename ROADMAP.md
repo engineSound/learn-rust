@@ -54,7 +54,7 @@ A **vocabulary API with spaced repetition**, the same project as the
 
 | Milestone | What you get |
 |-----------|--------------|
-| M1 | Website lists lessons; editor; **Run** shows compiler and test output |
+| M1 ✅ | Website lists lessons; editor; **Run** shows compiler and test output |
 | M2 | Every run, pass, fail and question saved to the history database |
 | M3 | Learner profile generated after each session; review items scheduled |
 | M4 | Tutor: explanations of compiler errors from Claude, aware of your profile |
