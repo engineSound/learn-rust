@@ -24,6 +24,205 @@ Device readings come in many numeric types, and Rust never converts between them
 | return a small class for two values | return a tuple: `fn f() -> (i32, i32)`, destructure with `let (a, b) = f();` |
 | `int[] values` | a slice `&[i32]`: a borrowed view of an array or `Vec` |
 
+```visual
+{
+ "title": "Casts and slices, visualised",
+ "scenarios": [
+  {
+   "name": "as u8 vs clamp",
+   "group": "How it works",
+   "regions": [
+    {
+     "id": "in",
+     "label": "i32"
+    },
+    {
+     "id": "cast",
+     "label": "Conversion"
+    },
+    {
+     "id": "res",
+     "label": "u8 (0–255)"
+    }
+   ],
+   "code": "let raw: i32 = 300;\nlet wrapped = raw as u8;\nlet clamped = raw.clamp(0, 255) as u8;\nprintln!(\"{wrapped} {clamped}\");",
+   "check": {
+    "output": "44 255"
+   },
+   "steps": [
+    {
+     "line": 1,
+     "say": "A reading of 300 in an `i32`.",
+     "set": [
+      {
+       "id": "r",
+       "in": "in",
+       "title": "raw",
+       "value": "300",
+       "tag": "i32",
+       "state": "ok"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "say": "`as u8` keeps only the lowest 8 bits: 300 − 256 = 44. No error, no warning.",
+     "rule": "`as` never fails: it truncates, wraps or saturates.",
+     "set": [
+      {
+       "id": "c1",
+       "in": "cast",
+       "title": "as u8",
+       "tag": "wraps"
+      },
+      {
+       "id": "w",
+       "in": "res",
+       "title": "wrapped",
+       "value": "44",
+       "tag": "surprise!",
+       "state": "bad"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "r",
+       "to": "c1",
+       "state": "muted"
+      },
+      {
+       "from": "c1",
+       "to": "w",
+       "state": "bad"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "say": "Clamping first keeps the value inside 0–255, so the cast is safe.",
+     "rule": "Make lossy conversions explicit: clamp, then cast.",
+     "set": [
+      {
+       "id": "c2",
+       "in": "cast",
+       "title": ".clamp(0, 255) as u8",
+       "tag": "safe"
+      },
+      {
+       "id": "cl",
+       "in": "res",
+       "title": "clamped",
+       "value": "255",
+       "state": "ok"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "r",
+       "to": "c2",
+       "state": "muted"
+      },
+      {
+       "from": "c2",
+       "to": "cl",
+       "state": "ok"
+      }
+     ]
+    },
+    {
+     "line": 4,
+     "say": "Printed: 44 255."
+    }
+   ]
+  },
+  {
+   "name": "A slice borrows",
+   "group": "How it works",
+   "regions": [
+    {
+     "id": "stack",
+     "label": "Stack · your variables"
+    },
+    {
+     "id": "heap",
+     "label": "Heap · the actual data"
+    }
+   ],
+   "code": "let readings = vec![20.5, 21.0, 22.5];\nlet first_two = &readings[0..2];\nprintln!(\"{:?} {}\", first_two, readings.len());",
+   "check": {
+    "output": "[20.5, 21.0] 3"
+   },
+   "steps": [
+    {
+     "line": 1,
+     "say": "A `Vec` owns three readings on the heap.",
+     "set": [
+      {
+       "id": "v",
+       "in": "stack",
+       "title": "readings",
+       "tag": "owner",
+       "sub": "Vec<f64>",
+       "state": "ok"
+      },
+      {
+       "id": "h",
+       "in": "heap",
+       "title": "[20.5, 21.0, 22.5]"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "v",
+       "to": "h",
+       "state": "ok"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "say": "`&readings[0..2]` is a **slice**: a borrowed view of part of the data. Nothing is copied.",
+     "rule": "A slice `&[T]` is a pointer plus a length.",
+     "set": [
+      {
+       "id": "s",
+       "in": "stack",
+       "title": "first_two",
+       "tag": "&[f64] · len 2",
+       "state": "active"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "v",
+       "to": "h",
+       "state": "ok"
+      },
+      {
+       "from": "s",
+       "to": "h",
+       "label": "[0..2]",
+       "state": "accent"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "say": "Both are usable: the slice only borrowed.",
+     "rule": "Functions that only read should take `&[T]`, not `Vec<T>`.",
+     "set": [
+      {
+       "id": "s",
+       "state": "normal"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
+```
+
 ```run
 let raw: i32 = 300;
 println!("as u8 wraps: {}", raw as u8);

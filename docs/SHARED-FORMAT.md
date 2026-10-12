@@ -49,7 +49,7 @@ these `##` sections of `lesson.md` (in this order):
 
 | Section | Shown as | Content |
 |---------|----------|---------|
-| `## Learn the idea` (`## Recall` for drills and stretches) | step 1 | 2–4 short paragraphs, a Java contrast, and at least one ```run block |
+| `## Learn the idea` (`## Recall` for drills and stretches) | step 1 | 2–4 short paragraphs, a Java contrast, a ```visual (core lessons), and at least one ```run block |
 | `## Quick check` | step 2 | one ```predict block (optional for drills) |
 | `## Your turn` | step 3 | what to write, in one or two sentences |
 | `## Example` | inside step 3 | calls and results: `name(args)  →  result` |
@@ -76,6 +76,42 @@ answer: true
 why: `==` converts the empty string to 0 first.
 ```
 ````
+
+**Visualizations.** A ```visual block (JSON) becomes an animated, step-through
+scene (`app/public/visual.js`): scenario buttons grouped under *How it works*
+and *What if it goes wrong*, the code with the current line highlighted, boxes
+in labelled regions (stack/heap, call stack/queue, before/after…), arrows, a
+*Step* explanation and a *Rule*, plus Back / Play / Next and ← → keys.
+
+```
+{ "title": "See it in action", "intro": "…",
+  "regions": [ { "id": "stack", "label": "Stack · your variables" },
+               { "id": "out", "label": "Console", "kind": "output" } ],
+  "scenarios": [ {
+    "name": "Move", "group": "How it works" | "What if it goes wrong",
+    "code": "let a = …\nlet b = a;",
+    "regions": [ … ],                     // optional, overrides the top level
+    "check": { "output": "hi" }           // or { "error": "E0382" }; optional "prelude", "code"
+    "steps": [ {
+      "line": 2,                          // highlighted line (or a list), optional
+      "say": "What happens, in plain words.",
+      "rule": "The rule behind it.",      // optional
+      "set": [ { "id": "a", "in": "stack", "title": "a", "value": "…", "tag": "owner",
+                 "sub": "String", "state": "ok" } ],  // add, or update fields by id
+      "drop": [ "b" ],                    // remove boxes
+      "arrows": [ { "from": "a", "to": "hi", "label": "&", "state": "accent", "style": "solid" } ],
+      "error": "E0382: borrow of moved value"         // shown in red for this step
+    } ] } ] }
+```
+
+Box states: `normal`, `ok`, `active`, `info`, `bad`, `moved`, `faded`. A box
+whose `in` changes **slides** to its new region; new boxes fade in; dropped
+boxes fade out; arrows (replaced per step) draw themselves. Arrow states: `ok`,
+`accent`, `muted`, `bad`.
+
+Both apps' tests validate every visual (regions, arrows and lines refer to
+things that exist) and run each scenario's `check` for real, so a visual can
+never claim output or a compiler error that isn't true.
 
 `run` blocks are editable and run with `POST /api/snippet` (Node: an ES
 module; Rust: the body of `fn main` unless it defines one). In `predict`

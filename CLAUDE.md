@@ -30,6 +30,9 @@ Lesson design (from the learner's feedback: lessons must teach, not just test):
 - One practical skill per exercise, about 8 minutes, set in the
   device-and-service story; test names are plain sentences.
 - Every ```predict answer must be exactly what the code prints; check it.
+- Every core lesson has a ```visual: an animated step-through of what the code
+  does at runtime, with at least one "What if it goes wrong" scenario. Give
+  scenarios a `check` (output or error code); the tests run it for real.
 
 Teaching rules:
 - The learner is a professional Java developer. Contrast with Java; skip

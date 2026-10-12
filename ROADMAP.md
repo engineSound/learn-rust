@@ -20,6 +20,10 @@ ownership, so Phase 2 gets the most time and the most review.
 | 04 | Enums and `match` | enums carry data; `match` must be exhaustive |
 | 05 | `Option` and `Result` | no `null`, no exceptions |
 
+Built so far: 01 Bindings and expressions, 02 Types, tuples and slices, and an
+early look at ownership, **03 Who owns the reading?** (moves, `&`, `&mut`, with
+the animated stack/heap visual), each with a step-through visual.
+
 ### Phase 2: Ownership (weeks 4–7), the biggest shift from Java
 | # | Lesson | |
 |---|--------|---|

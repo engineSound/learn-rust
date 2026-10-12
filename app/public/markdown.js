@@ -1,7 +1,8 @@
 // Minimal Markdown renderer for lesson.md files (shared by both apps).
 // Supports headings, paragraphs, fenced code, tables, lists, inline code,
 // bold, italic and links, plus two lesson blocks: ```run (a runnable example)
-// and ```predict (a quick-check question), which app.js turns into widgets. Lessons are written by us, but text is still escaped.
+// ```predict (a quick-check question) and ```visual (a step-through animation),
+// which app.js and visual.js turn into widgets. Lessons are written by us, but text is still escaped.
 (function () {
   function esc(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -30,7 +31,10 @@
         while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
         i++;
         var text = buf.join('\n');
-        if (lang === 'run') {
+        if (lang === 'visual') {
+          // A step-through visualization (JSON); visual.js turns it into an animated scene.
+          out.push('<div class="visual" data-spec="' + esc(encodeURIComponent(text)) + '"></div>');
+        } else if (lang === 'run') {
           // An editable example the learner can run; app.js turns it into a widget.
           out.push('<div class="try" data-code="' + esc(encodeURIComponent(text)) + '"></div>');
         } else if (lang === 'predict') {

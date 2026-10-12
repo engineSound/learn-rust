@@ -249,6 +249,7 @@
 
   // ---------- widgets inside lesson text ----------
   function hydrate(root) {
+    if (window.hydrateVisuals) window.hydrateVisuals(root);
     Array.prototype.forEach.call(root.querySelectorAll('.try'), function (el) {
       var src = decodeURIComponent(el.getAttribute('data-code'));
       el.innerHTML = '<div class="try-bar"><span>Try it: change the code and run it</span><button type="button" class="btn small">▶ Run</button></div>' +

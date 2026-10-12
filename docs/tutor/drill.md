@@ -25,7 +25,7 @@ Concepts of that lesson: {{parent_concepts}}
   - `## Your turn`: one or two sentences saying what to write.
   - `## Example`: a ``` block of calls and results, like `name(args)  →  result`.
   - `## Hints`: a numbered list of 3 hints, from a gentle nudge to nearly the answer, never the full code.
-  Don't reveal the solution anywhere in the explanation.
+  Don't reveal the solution anywhere in the explanation. Don't include ```visual blocks.
 - `concepts`: one to three names taken only from this list: {{parent_concepts}}.
 - `slug`: 2–4 lowercase words joined by hyphens, describing the drill.
 - `targets`: one sentence saying which mistake or concept this drill targets and why.

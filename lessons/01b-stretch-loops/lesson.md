@@ -20,6 +20,178 @@ A harder one, for when *Bindings and expressions* felt easy.
 
 Rust has three loops: `for x in iter`, `while cond`, and `loop`. Unlike in Java, `loop` is an expression: `break value;` makes the whole loop evaluate to `value`.
 
+```visual
+{
+ "title": "A loop that returns a value",
+ "regions": [
+  {
+   "id": "vars",
+   "label": "Variables"
+  },
+  {
+   "id": "out",
+   "label": "Console",
+   "kind": "output"
+  }
+ ],
+ "scenarios": [
+  {
+   "name": "break with a value",
+   "group": "How it works",
+   "code": "let mut n = 1;\nlet first_big = loop {\n    n *= 3;\n    if n > 100 {\n        break n;\n    }\n};\nprintln!(\"{first_big}\");",
+   "check": {
+    "output": "243"
+   },
+   "steps": [
+    {
+     "line": 1,
+     "say": "`n` starts at 1.",
+     "set": [
+      {
+       "id": "n",
+       "in": "vars",
+       "title": "n",
+       "value": "1",
+       "tag": "mut",
+       "state": "ok"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "say": "`n *= 3` → 3. Not above 100 yet, so the loop goes round again.",
+     "set": [
+      {
+       "id": "n",
+       "value": "3",
+       "state": "active"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "say": "`n *= 3` → 9. Not above 100 yet, so the loop goes round again.",
+     "set": [
+      {
+       "id": "n",
+       "value": "9",
+       "state": "active"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "say": "`n *= 3` → 27. Not above 100 yet, so the loop goes round again.",
+     "set": [
+      {
+       "id": "n",
+       "value": "27",
+       "state": "active"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "say": "`n *= 3` → 81. Not above 100 yet, so the loop goes round again.",
+     "set": [
+      {
+       "id": "n",
+       "value": "81",
+       "state": "active"
+      }
+     ]
+    },
+    {
+     "line": 5,
+     "say": "243 is above 100: `break n` ends the loop **and** hands back the value.",
+     "rule": "`loop` is an expression: `break value` is its result.",
+     "set": [
+      {
+       "id": "n",
+       "value": "243"
+      },
+      {
+       "id": "fb",
+       "in": "vars",
+       "title": "first_big",
+       "value": "243",
+       "state": "ok"
+      }
+     ],
+     "arrows": [
+      {
+       "from": "n",
+       "to": "fb",
+       "label": "break n",
+       "state": "ok"
+      }
+     ]
+    },
+    {
+     "line": 8,
+     "say": "Printed: 243.",
+     "set": [
+      {
+       "id": "o",
+       "in": "out",
+       "title": "243"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Overflow",
+   "group": "What if it goes wrong",
+   "code": "let readings: [u8; 2] = [250, 10];\nlet mut total: u8 = 0;\nfor r in readings {\n    total += r;\n}",
+   "check": {
+    "error": "overflow"
+   },
+   "steps": [
+    {
+     "line": 2,
+     "say": "`total` is a `u8`: 0 to 255.",
+     "set": [
+      {
+       "id": "t",
+       "in": "vars",
+       "title": "total",
+       "value": "0",
+       "tag": "u8",
+       "state": "ok"
+      }
+     ]
+    },
+    {
+     "line": 4,
+     "say": "+250 → 250.",
+     "set": [
+      {
+       "id": "t",
+       "value": "250",
+       "state": "active"
+      }
+     ]
+    },
+    {
+     "line": 4,
+     "say": "+10 would be 260, too big for a `u8`. In a debug build Rust **panics**; Java would silently wrap.",
+     "rule": "Pick a type wide enough (here `u32`), or use `checked_add`.",
+     "set": [
+      {
+       "id": "t",
+       "value": "260?",
+       "state": "bad"
+      }
+     ],
+     "error": "panicked: attempt to add with overflow"
+    }
+   ]
+  }
+ ]
+}
+```
+
 ```run
 let mut n = 1;
 let first_big = loop {

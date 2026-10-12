@@ -159,4 +159,73 @@ mod tests {
             }
         }
     }
+
+    /// Every ```visual block is well-formed, and its checks match what the compiler really does.
+    #[test]
+    fn every_visual_is_well_formed_and_checked() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lessons");
+        let data = std::env::temp_dir().join(format!("learn-visual-test-{}", std::process::id()));
+        let str_of = |j: &Json, k: &str| j.get(k).and_then(Json::as_str).unwrap_or("").to_string();
+        let mut count = 0;
+        for l in list(&dir) {
+            for block in l.body.split("```visual\n").skip(1) {
+                let spec = crate::json::parse(block.split("\n```").next().unwrap()).unwrap_or_else(|e| panic!("{}: bad visual JSON: {e}", l.slug));
+                let top_regions = spec.get("regions").map(Json::as_array).unwrap_or(&[]).to_vec();
+                for sc in spec.get("scenarios").map(Json::as_array).unwrap_or(&[]) {
+                    let place = format!("{} / {}", l.slug, str_of(sc, "name"));
+                    let regions: Vec<String> = sc.get("regions").map(Json::as_array).unwrap_or(&top_regions).iter().map(|r| str_of(r, "id")).collect();
+                    let code = str_of(sc, "code");
+                    let lines = code.lines().count() as f64;
+                    let steps = sc.get("steps").map(Json::as_array).unwrap_or(&[]);
+                    assert!(!regions.is_empty() && steps.len() >= 2, "{place}: needs regions and at least 2 steps");
+                    let mut boxes: Vec<(String, String)> = Vec::new(); // (id, region)
+                    for (i, step) in steps.iter().enumerate() {
+                        for id in step.get("drop").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str) {
+                            boxes.retain(|b| b.0 != id);
+                        }
+                        for set in step.get("set").map(Json::as_array).unwrap_or(&[]) {
+                            let id = str_of(set, "id");
+                            let region = set.get("in").and_then(Json::as_str).map(String::from);
+                            match boxes.iter_mut().find(|b| b.0 == id) {
+                                Some(b) => {
+                                    if let Some(r) = region {
+                                        b.1 = r;
+                                    }
+                                }
+                                None => boxes.push((id.clone(), region.unwrap_or_else(|| panic!("{place} step {}: new box {id} needs \"in\"", i + 1)))),
+                            }
+                        }
+                        for b in &boxes {
+                            assert!(regions.contains(&b.1), "{place} step {}: box {} is in unknown region {}", i + 1, b.0, b.1);
+                        }
+                        for a in step.get("arrows").map(Json::as_array).unwrap_or(&[]) {
+                            for end in ["from", "to"] {
+                                let id = str_of(a, end);
+                                assert!(boxes.iter().any(|b| b.0 == id), "{place} step {}: arrow points at missing box {id}", i + 1);
+                            }
+                        }
+                        if let Some(n) = step.get("line").and_then(Json::as_f64) {
+                            assert!(n >= 1.0 && n <= lines, "{place} step {}: line {n} is outside the code", i + 1);
+                        }
+                        assert!(!str_of(step, "say").is_empty(), "{place} step {}: needs \"say\"", i + 1);
+                    }
+                    if let Some(check) = sc.get("check") {
+                        let run_code = check.get("code").and_then(Json::as_str).map(String::from).unwrap_or(code.clone());
+                        let full = format!("{}{}", check.get("prelude").and_then(Json::as_str).map(|p| format!("{p}\n")).unwrap_or_default(), run_code);
+                        let r = crate::runner::run_snippet(&full, &data).unwrap();
+                        let ok = r.get("ok").and_then(Json::as_bool) == Some(true);
+                        if let Some(err) = check.get("error").and_then(Json::as_str) {
+                            assert!(!ok && r.to_string().contains(err), "{place}: expected {err}, got {}", r.to_string());
+                        } else {
+                            let out = r.get("output").and_then(Json::as_str).unwrap_or("").trim().to_string();
+                            assert_eq!(out, str_of(check, "output"), "{place}: the visual claims different output");
+                        }
+                    }
+                    count += 1;
+                }
+            }
+        }
+        std::fs::remove_dir_all(&data).ok();
+        assert!(count >= 10, "expected visuals in the lessons, found {count} scenarios");
+    }
 }
