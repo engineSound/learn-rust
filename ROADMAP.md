@@ -5,7 +5,8 @@ learner and researcher. **Goal:** general fluency plus backend/APIs.
 **Pace:** short daily sessions (~20 min), under 3 hours a week. Rust takes
 longer than Node; week numbers assume that pace, and slower is fine.
 
-Lessons contrast with Java first. Rust's hard part for Java developers is
+The order below is the *core* path. The app adapts around it (drills, stretches,
+reviews; see `docs/SHARED-FORMAT.md`, section 5). Lessons contrast with Java first. Rust's hard part for Java developers is
 ownership, so Phase 2 gets the most time and the most review.
 
 ## Learning path
@@ -57,5 +58,6 @@ A **vocabulary API with spaced repetition**, the same project as the
 | M1 ✅ | Website lists lessons; editor; **Run** shows compiler and test output |
 | M2 ✅ | Every run, pass and fail saved to the history log (`data/events.jsonl`) |
 | M3 ✅ | Learner profile generated after each session; review items scheduled |
-| M4 | Tutor: explanations of compiler errors from Claude, aware of your profile |
+| M3.5 ✅ | Adaptive path: reviews with fresh drills, extra drills after a struggle, stretches after an easy win, your own difficulty ratings |
+| M4 | **Tutor (Claude API)**: compiler-error explanations and hints in your style; generates new drills aimed at your recurring mistakes, verified against a reference solution before you see them |
 | M5 | Docker; deploy to an existing EC2 instance behind a login |

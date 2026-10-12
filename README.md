@@ -14,7 +14,8 @@ so they can merge into one multi-language tutor later.
 - [x] Web app (M1): lesson list, editor, Run button → compiler errors and test results in about a second
 - [x] Learning history (M2): every run recorded; each lesson shows runs, best score and when you solved it
 - [x] Learner profile (M3): concept mastery, spaced-repetition reviews, recurring mistakes and the next step, written into `PROGRESS.md` after every run
-- [ ] Tutor (Claude API) reading the profile
+- [x] Adaptive path (M3.5): reviews use fresh drills; struggles get extra drills, easy wins get stretch exercises; rate each exercise too easy / about right / too hard
+- [ ] Tutor (Claude API): hints, explanations and newly generated drills aimed at your mistakes
 - [ ] Docker setup; deploy to AWS
 
 ## Start the app

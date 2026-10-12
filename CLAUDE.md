@@ -8,6 +8,18 @@ This repo is a personal Rust tutor app and its lessons. Read these first:
 3. `docs/SHARED-FORMAT.md`: lesson and history formats. **They are shared with
    the `learn-nodejs` repo; change them in both repos or not at all.**
 
+Core requirement (from the learner): **lessons must adapt to the person's
+learning, style, progress and reviews.** Nothing is one-size-fits-all:
+- What comes next is chosen from the history (`docs/SHARED-FORMAT.md`,
+  section 5): reviews when due, extra drills after a struggle, harder stretch
+  exercises after an easy win, otherwise the next core lesson.
+- Reviews use a *fresh* exercise on the same concepts (a drill), not a replay
+  of code already written.
+- The learner rates each solved exercise (too easy / about right / too hard);
+  respect that signal together with runs-to-solve and recurring mistakes.
+- When adding content, add drills and stretches for each core lesson, not just
+  the next core lesson. The tutor (M4) will generate targeted drills too.
+
 Teaching rules:
 - The learner is a professional Java developer. Contrast with Java; skip
   basics Java already covers. Spend time on ownership and borrowing.

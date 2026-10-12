@@ -1,5 +1,6 @@
-//! Learner profile: derived from the event log (format: docs/SHARED-FORMAT.md, section 4).
-//! learn-nodejs/app/profile.js implements the same rules; docs/fixtures/ keeps them in step.
+//! Learner profile and adaptive next step, derived from the event log.
+//! Rules: docs/SHARED-FORMAT.md, section 5. learn-nodejs/app/profile.js implements the
+//! same rules; docs/fixtures/ keeps the two in step.
 
 use crate::history::iso_from_millis;
 use crate::json::Json;
@@ -10,6 +11,10 @@ use std::path::Path;
 const DAY: i64 = 86_400_000;
 const SESSION_GAP: i64 = 30 * 60_000;
 pub const REVIEW_DAYS: [i64; 5] = [1, 3, 7, 16, 35];
+/// Solved on run 4 or later = struggled.
+const STRUGGLE_RUNS: usize = 4;
+/// This many runs on an unsolved lesson = offer a drill.
+const WARMUP_RUNS: usize = 3;
 const START: &str = "<!-- profile:start -->";
 const END: &str = "<!-- profile:end -->";
 
@@ -17,6 +22,10 @@ pub struct LessonRef {
     pub id: String,
     pub title: String,
     pub concepts: Vec<String>,
+    /// "core", "drill" or "stretch".
+    pub kind: String,
+    /// For drills and stretches: the core lesson they practise.
+    pub parent: Option<String>,
 }
 
 #[derive(Default)]
@@ -27,6 +36,9 @@ struct LessonState {
     lapsed: bool,
     runs: usize,
     first_pass: Option<usize>,
+    first_pass_ts: String,
+    last_run_ts: String,
+    feedback: Option<String>,
 }
 
 /// Milliseconds since the epoch for "YYYY-MM-DDTHH:MM:SS(.mmm)Z"; None if malformed.
@@ -67,27 +79,41 @@ fn opt_num(n: Option<usize>) -> Json {
 /// Build the profile. `lessons` are in lesson order, `events` oldest first.
 pub fn build_profile(track: &str, lessons: &[LessonRef], events: &[Json], now: &str) -> Json {
     let now_ms = parse_iso(now).unwrap_or(0);
-    let runs: Vec<(&Json, i64)> = events
-        .iter()
-        .filter(|e| matches!(str_of(e, "kind"), Some("pass" | "fail")))
-        .filter_map(|e| Some((e, parse_iso(str_of(e, "ts")?)?)))
-        .collect();
+    let is_run = |e: &Json| matches!(str_of(e, "kind"), Some("pass" | "fail"));
+    let children_of = |id: &str| -> Vec<usize> { (0..lessons.len()).filter(|&i| lessons[i].kind != "core" && lessons[i].parent.as_deref() == Some(id)).collect() };
 
+    // Own runs for every item; review schedule for core lessons, where a run on one of
+    // the lesson's drills or stretches also counts as a review once the lesson is due.
     let states: Vec<LessonState> = lessons
         .iter()
         .map(|l| {
+            let children: Vec<&str> = if l.kind == "core" { children_of(&l.id).into_iter().map(|i| lessons[i].id.as_str()).collect() } else { Vec::new() };
             let mut st = LessonState::default();
-            for (e, t) in runs.iter().filter(|(e, _)| str_of(e, "lesson_id") == Some(l.id.as_str())) {
-                st.runs += 1;
+            for e in events {
+                let id = str_of(e, "lesson_id").unwrap_or("");
+                let mine = id == l.id;
+                if str_of(e, "kind") == Some("feedback") && mine {
+                    st.feedback = e.get("payload").and_then(|p| p.get("difficulty")).and_then(Json::as_str).map(String::from);
+                }
+                if !is_run(e) || !(mine || children.contains(&id)) {
+                    continue;
+                }
+                let ts = str_of(e, "ts").unwrap_or("");
+                let Some(t) = parse_iso(ts) else { continue };
                 let pass = str_of(e, "kind") == Some("pass");
+                if mine {
+                    st.runs += 1;
+                    st.last_run_ts = ts.to_string();
+                }
                 if !st.solved {
-                    if pass {
+                    if mine && pass {
                         st.solved = true;
                         st.first_pass = Some(st.runs);
+                        st.first_pass_ts = ts.to_string();
                         st.step = 0;
                         st.due = t + REVIEW_DAYS[0] * DAY;
                     }
-                } else if *t >= st.due {
+                } else if l.kind == "core" && t >= st.due {
                     if pass {
                         st.step = if st.lapsed { 0 } else { (st.step + 1).min(REVIEW_DAYS.len() - 1) };
                         st.lapsed = false;
@@ -100,8 +126,10 @@ pub fn build_profile(track: &str, lessons: &[LessonRef], events: &[Json], now: &
             st
         })
         .collect();
+    let reviewed = |i: usize| lessons[i].kind == "core" && states[i].solved;
 
-    let score = |s: &LessonState| -> Option<f64> {
+    let score = |i: usize| -> Option<f64> {
+        let s = &states[i];
         if s.runs == 0 {
             return None;
         }
@@ -113,27 +141,28 @@ pub fn build_profile(track: &str, lessons: &[LessonRef], events: &[Json], now: &
             Some(n) if n <= 3 => 0.6,
             _ => 0.5,
         };
-        Some((base + 0.1 * s.step as f64 - if s.lapsed { 0.2 } else { 0.0 }).clamp(0.0, 1.0))
+        let step = if reviewed(i) { s.step as f64 } else { 0.0 };
+        Some((base + 0.1 * step - if s.lapsed { 0.2 } else { 0.0 }).clamp(0.0, 1.0))
     };
     let mut concepts: Vec<(String, Vec<f64>, Vec<String>)> = Vec::new();
-    for (l, s) in lessons.iter().zip(&states) {
+    for (i, l) in lessons.iter().enumerate() {
         for name in &l.concepts {
-            let i = match concepts.iter().position(|c| &c.0 == name) {
-                Some(i) => i,
+            let c = match concepts.iter().position(|c| &c.0 == name) {
+                Some(c) => c,
                 None => {
                     concepts.push((name.clone(), Vec::new(), Vec::new()));
                     concepts.len() - 1
                 }
             };
-            concepts[i].2.push(l.id.clone());
-            if let Some(v) = score(s) {
-                concepts[i].1.push(v);
+            concepts[c].2.push(l.id.clone());
+            if let Some(v) = score(i) {
+                concepts[c].1.push(v);
             }
         }
     }
 
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for (e, _) in runs.iter().filter(|(e, _)| str_of(e, "kind") == Some("fail")) {
+    for e in events.iter().filter(|e| str_of(e, "kind") == Some("fail")) {
         let Some(p) = e.get("payload") else { continue };
         let errors = p.get("errors").map(Json::as_array).unwrap_or(&[]);
         let failing = p.get("failing").map(Json::as_array).unwrap_or(&[]);
@@ -168,34 +197,34 @@ pub fn build_profile(track: &str, lessons: &[LessonRef], events: &[Json], now: &
         cursor -= DAY;
     }
 
-    struct Out<'a> {
-        l: &'a LessonRef,
-        s: &'a LessonState,
-        due: Option<String>,
-        due_now: bool,
+    let mut feedback = [("easy", 0usize), ("right", 0), ("hard", 0)];
+    for e in events.iter().filter(|e| str_of(e, "kind") == Some("feedback")) {
+        let d = e.get("payload").and_then(|p| p.get("difficulty")).and_then(Json::as_str);
+        if let Some(slot) = feedback.iter_mut().find(|(k, _)| Some(*k) == d) {
+            slot.1 += 1;
+        }
     }
-    let out: Vec<Out> = lessons
-        .iter()
-        .zip(&states)
-        .map(|(l, s)| Out { l, s, due: s.solved.then(|| iso_from_millis(s.due)), due_now: s.solved && now_ms >= s.due })
-        .collect();
-    let status = |s: &LessonState| if s.solved { "solved" } else if s.runs > 0 { "started" } else { "new" };
-
-    let mut due_now: Vec<&Out> = out.iter().filter(|o| o.due_now).collect();
-    due_now.sort_by(|a, b| a.due.cmp(&b.due));
-    let next = if let Some(o) = due_now.first() {
-        ("review", Json::str(o.l.id.clone()), Json::str(o.l.title.clone()), format!("due since {}", day(o.due.as_deref().unwrap_or(""))))
-    } else if let Some(o) = out.iter().find(|o| !o.s.solved) {
-        let reason = if o.s.runs > 0 { "in progress" } else { "next new lesson" };
-        ("lesson", Json::str(o.l.id.clone()), Json::str(o.l.title.clone()), reason.to_string())
-    } else {
-        let earliest = out.iter().filter_map(|o| o.due.clone()).min();
-        let reason = match earliest {
-            Some(d) => format!("all lessons solved; next review {}", day(&d)),
-            None => "all lessons solved".to_string(),
-        };
-        ("done", Json::Null, Json::Null, reason)
+    let mut solved_runs: Vec<usize> = (0..lessons.len()).filter(|&i| reviewed(i)).filter_map(|i| states[i].first_pass).collect();
+    solved_runs.sort();
+    let mid = solved_runs.len() / 2;
+    let median = match solved_runs.len() {
+        0 => Json::Null,
+        n if n % 2 == 1 => Json::Num(solved_runs[mid] as f64),
+        _ => Json::Num((solved_runs[mid - 1] + solved_runs[mid]) as f64 / 2.0),
     };
+
+    let views: Vec<View> = (0..lessons.len())
+        .map(|i| {
+            let s = &states[i];
+            View {
+                i,
+                status: if s.solved { "solved" } else if s.runs > 0 { "started" } else { "new" },
+                due: reviewed(i).then(|| iso_from_millis(s.due)),
+                due_now: reviewed(i) && now_ms >= s.due,
+            }
+        })
+        .collect();
+    let next = choose_next(lessons, &states, &views);
 
     Json::obj(vec![
         ("generated_at", Json::str(now)),
@@ -210,19 +239,31 @@ pub fn build_profile(track: &str, lessons: &[LessonRef], events: &[Json], now: &
             ]),
         ),
         (
+            "pace",
+            Json::obj(vec![
+                ("median_runs_to_solve", median),
+                ("feedback", Json::obj(feedback.iter().map(|(k, n)| (*k, Json::Num(*n as f64))).collect())),
+            ]),
+        ),
+        (
             "lessons",
             Json::Arr(
-                out.iter()
-                    .map(|o| {
+                views
+                    .iter()
+                    .map(|v| {
+                        let (l, s) = (&lessons[v.i], &states[v.i]);
                         Json::obj(vec![
-                            ("id", Json::str(o.l.id.clone())),
-                            ("title", Json::str(o.l.title.clone())),
-                            ("status", Json::str(status(o.s))),
-                            ("runs", Json::Num(o.s.runs as f64)),
-                            ("first_pass_run", opt_num(o.s.first_pass)),
-                            ("review_step", opt_num(o.s.solved.then_some(o.s.step))),
-                            ("due", o.due.clone().map(Json::Str).unwrap_or(Json::Null)),
-                            ("due_now", Json::Bool(o.due_now)),
+                            ("id", Json::str(l.id.clone())),
+                            ("title", Json::str(l.title.clone())),
+                            ("kind", Json::str(l.kind.clone())),
+                            ("for", l.parent.clone().map(Json::Str).unwrap_or(Json::Null)),
+                            ("status", Json::str(v.status)),
+                            ("runs", Json::Num(s.runs as f64)),
+                            ("first_pass_run", opt_num(s.first_pass)),
+                            ("feedback", s.feedback.clone().map(Json::Str).unwrap_or(Json::Null)),
+                            ("review_step", opt_num(reviewed(v.i).then_some(s.step))),
+                            ("due", v.due.clone().map(Json::Str).unwrap_or(Json::Null)),
+                            ("due_now", Json::Bool(v.due_now)),
                         ])
                     })
                     .collect(),
@@ -248,8 +289,73 @@ pub fn build_profile(track: &str, lessons: &[LessonRef], events: &[Json], now: &
             "recurring",
             Json::Arr(recurring.into_iter().map(|(what, count)| Json::obj(vec![("what", Json::Str(what)), ("count", Json::Num(count as f64))])).collect()),
         ),
-        ("next", Json::obj(vec![("kind", Json::str(next.0)), ("lesson_id", next.1), ("title", next.2), ("reason", Json::Str(next.3))])),
+        ("next", next),
     ])
+}
+
+struct View {
+    i: usize,
+    status: &'static str,
+    due: Option<String>,
+    due_now: bool,
+}
+
+/// The adaptive next step (SHARED-FORMAT.md, section 5).
+fn choose_next(lessons: &[LessonRef], states: &[LessonState], views: &[View]) -> Json {
+    let pick = |i: usize, kind: &str, reason: String| {
+        Json::obj(vec![("kind", Json::str(kind)), ("lesson_id", Json::str(lessons[i].id.clone())), ("title", Json::str(lessons[i].title.clone())), ("reason", Json::Str(reason))])
+    };
+    let children = |i: usize| -> Vec<usize> { (0..lessons.len()).filter(|&c| lessons[c].kind != "core" && lessons[c].parent.as_deref() == Some(lessons[i].id.as_str())).collect() };
+    let core: Vec<usize> = (0..lessons.len()).filter(|&i| lessons[i].kind == "core").collect();
+    let unsolved_child = |i: usize, kind: &str| children(i).into_iter().find(|&c| lessons[c].kind == kind && views[c].status != "solved");
+
+    // 1. Reviews: most overdue first, practised with a drill when there is one.
+    let mut due: Vec<usize> = core.iter().copied().filter(|&i| views[i].due_now).collect();
+    due.sort_by(|&a, &b| views[a].due.cmp(&views[b].due));
+    if let Some(&l) = due.first() {
+        let since = views[l].due.as_deref().map(day).unwrap_or("").to_string();
+        // Never-run first, then the one run longest ago; ties keep lesson order.
+        let mut drills: Vec<usize> = children(l).into_iter().filter(|&c| lessons[c].kind == "drill").collect();
+        drills.sort_by(|&a, &b| states[a].last_run_ts.cmp(&states[b].last_run_ts));
+        return match drills.first() {
+            Some(&d) => pick(d, "review", format!("review of \"{}\", due since {since}", lessons[l].title)),
+            None => pick(l, "review", format!("due since {since}")),
+        };
+    }
+
+    // 2. React to the most recently solved core lesson, unless the learner has moved on.
+    let mut solved: Vec<usize> = core.iter().copied().filter(|&i| views[i].status == "solved").collect();
+    solved.sort_by(|&a, &b| states[a].first_pass_ts.cmp(&states[b].first_pass_ts));
+    if let Some(&last) = solved.last() {
+        let pos = core.iter().position(|&i| i == last).unwrap_or(0);
+        if !core[pos + 1..].iter().any(|&i| states[i].runs > 0) {
+            let fb = states[last].feedback.as_deref();
+            let struggled = fb == Some("hard") || (fb != Some("easy") && states[last].first_pass.unwrap_or(0) >= STRUGGLE_RUNS);
+            let breezed = fb == Some("easy");
+            if let (true, Some(d)) = (struggled, unsolved_child(last, "drill")) {
+                return pick(d, "drill", format!("extra practice: \"{}\" was hard", lessons[last].title));
+            }
+            if let (true, Some(s)) = (breezed, unsolved_child(last, "stretch")) {
+                return pick(s, "stretch", format!("\"{}\" was easy, so here's a harder one", lessons[last].title));
+            }
+        }
+    }
+
+    // 3. The current lesson: offer a warm-up drill after several unsuccessful runs.
+    if let Some(&cur) = core.iter().find(|&&i| views[i].status != "solved") {
+        let runs = states[cur].runs;
+        if let (true, Some(d)) = (runs >= WARMUP_RUNS, unsolved_child(cur, "drill")) {
+            return pick(d, "drill", format!("warm-up: \"{}\" has taken {runs} runs so far", lessons[cur].title));
+        }
+        return pick(cur, "lesson", if runs > 0 { "in progress".into() } else { "next new lesson".into() });
+    }
+
+    let earliest = core.iter().filter_map(|&i| views[i].due.clone()).min();
+    let reason = match earliest {
+        Some(d) => format!("all lessons solved; next review {}", day(&d)),
+        None => "all lessons solved".to_string(),
+    };
+    Json::obj(vec![("kind", Json::str("done")), ("lesson_id", Json::Null), ("title", Json::Null), ("reason", Json::Str(reason))])
 }
 
 pub fn profile_markdown(p: &Json) -> String {
@@ -266,11 +372,13 @@ pub fn profile_markdown(p: &Json) -> String {
     ];
     let next = p.get("next");
     let (kind, title, reason) = (s(next.and_then(|x| x.get("kind"))), s(next.and_then(|x| x.get("title"))), s(next.and_then(|x| x.get("reason"))));
-    out.push(match kind.as_str() {
-        "review" => format!("**Next:** review \"{title}\" ({reason})."),
-        "lesson" => format!("**Next:** \"{title}\" ({reason})."),
-        _ => format!("**Next:** {reason}."),
-    });
+    let verb = match kind.as_str() {
+        "review" => "review ",
+        "drill" => "drill ",
+        "stretch" => "stretch ",
+        _ => "",
+    };
+    out.push(if kind == "done" { format!("**Next:** {reason}.") } else { format!("**Next:** {verb}\"{title}\" ({reason}).") });
     out.push(String::new());
     let sess = p.get("sessions");
     let count = n(sess.and_then(|x| x.get("count")));
@@ -288,8 +396,16 @@ pub fn profile_markdown(p: &Json) -> String {
         "**Sessions:** none yet.".to_string()
     });
     out.push(String::new());
-    out.push("| Lesson | Status | Runs | Solved on run | Review |".to_string());
-    out.push("|--------|--------|------|---------------|--------|".to_string());
+    let pace = p.get("pace");
+    let fb = |k: &str| n(pace.and_then(|x| x.get("feedback")).and_then(|f| f.get(k)));
+    let median = match pace.and_then(|x| x.get("median_runs_to_solve")).and_then(Json::as_f64) {
+        Some(m) => format!("lessons solved in a median of {m} {}", if m == 1.0 { "run" } else { "runs" }),
+        None => "no lessons solved yet".to_string(),
+    };
+    out.push(format!("**Pace:** {median}; rated too easy {}, about right {}, too hard {}.", fb("easy"), fb("right"), fb("hard")));
+    out.push(String::new());
+    out.push("| Exercise | Kind | Status | Runs | Solved on run | Rated | Review |".to_string());
+    out.push("|----------|------|--------|------|---------------|-------|--------|".to_string());
     for l in p.get("lessons").map(Json::as_array).unwrap_or(&[]) {
         let review = if l.get("due_now").and_then(Json::as_bool) == Some(true) {
             "due now".to_string()
@@ -303,7 +419,12 @@ pub fn profile_markdown(p: &Json) -> String {
             Some(v) => v.to_string(),
             None => "–".to_string(),
         };
-        out.push(format!("| {} | {} | {} | {first} | {review} |", s(l.get("title")), s(l.get("status")), n(l.get("runs"))));
+        let kind = match s(l.get("kind")).as_str() {
+            "core" => "lesson".to_string(),
+            other => other.to_string(),
+        };
+        let rated = l.get("feedback").and_then(Json::as_str).unwrap_or("–");
+        out.push(format!("| {} | {kind} | {} | {} | {first} | {rated} | {review} |", s(l.get("title")), s(l.get("status")), n(l.get("runs"))));
     }
     out.push(String::new());
     let practiced: Vec<&Json> = p.get("concepts").map(Json::as_array).unwrap_or(&[]).iter().filter(|c| c.get("mastery").and_then(Json::as_f64).is_some()).collect();
@@ -356,12 +477,15 @@ mod tests {
     }
 
     fn lessons_from(j: &Json) -> Vec<LessonRef> {
+        let text = |l: &Json, k: &str| l.get(k).and_then(Json::as_str).map(String::from);
         j.as_array()
             .iter()
             .map(|l| LessonRef {
-                id: l.get("id").and_then(Json::as_str).unwrap().to_string(),
-                title: l.get("title").and_then(Json::as_str).unwrap().to_string(),
+                id: text(l, "id").unwrap(),
+                title: text(l, "title").unwrap(),
                 concepts: l.get("concepts").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(String::from).collect(),
+                kind: text(l, "kind").unwrap_or_else(|| "core".into()),
+                parent: text(l, "for"),
             })
             .collect()
     }
@@ -376,33 +500,27 @@ mod tests {
     }
 
     #[test]
-    fn matches_the_shared_fixture() {
-        let input = parse(&fixture("profile-input.json")).unwrap();
-        let events = input.get("events").unwrap().as_array().to_vec();
-        let profile = build_profile(
-            input.get("track").and_then(Json::as_str).unwrap(),
-            &lessons_from(input.get("lessons").unwrap()),
-            &events,
-            input.get("now").and_then(Json::as_str).unwrap(),
-        );
-        assert_eq!(profile, parse(&fixture("profile-expected.json")).unwrap());
-        assert_eq!(profile_markdown(&profile) + "\n", fixture("profile-expected.md"));
+    fn matches_every_shared_case() {
+        let all = parse(&fixture("profile-cases.json")).unwrap();
+        let cases = all.get("cases").unwrap().as_array();
+        assert!(cases.len() >= 8);
+        for c in cases {
+            let name = c.get("name").and_then(Json::as_str).unwrap();
+            let profile = build_profile("demo", &lessons_from(c.get("lessons").unwrap()), c.get("events").unwrap().as_array(), c.get("now").and_then(Json::as_str).unwrap());
+            assert_eq!(&profile, c.get("expected").unwrap(), "case {name}");
+        }
+        assert_eq!(profile_markdown(cases[0].get("expected").unwrap()) + "\n", fixture("profile-expected.md"));
     }
 
     #[test]
-    fn empty_history_and_passing_reviews() {
-        let lessons = vec![LessonRef { id: "a".into(), title: "A".into(), concepts: vec!["c".into()] }];
-        let empty = build_profile("t", &lessons, &[], "2026-01-01T00:00:00.000Z");
-        assert_eq!(empty.get("next").and_then(|n| n.get("reason")), Some(&Json::str("next new lesson")));
-        assert_eq!(empty.get("sessions").and_then(|s| s.get("count")), Some(&Json::Num(0.0)));
-
+    fn passing_reviews_move_up_the_schedule() {
+        let lessons = vec![LessonRef { id: "a".into(), title: "A".into(), concepts: vec!["c".into()], kind: "core".into(), parent: None }];
         let ev = |ts: &str| parse(&format!(r#"{{"ts":"{ts}","lesson_id":"a","kind":"pass","payload":{{"failing":[],"errors":[]}}}}"#)).unwrap();
         let reviewed = build_profile("t", &lessons, &[ev("2026-01-01T10:00:00.000Z"), ev("2026-01-02T11:00:00.000Z"), ev("2026-01-05T12:00:00.000Z")], "2026-01-06T00:00:00.000Z");
         let lesson = &reviewed.get("lessons").unwrap().as_array()[0];
         assert_eq!(lesson.get("review_step"), Some(&Json::Num(2.0)));
         assert_eq!(lesson.get("due"), Some(&Json::str("2026-01-12T12:00:00.000Z")));
         assert_eq!(reviewed.get("concepts").unwrap().as_array()[0].get("mastery"), Some(&Json::Num(0.9)));
-        assert_eq!(reviewed.get("next").and_then(|n| n.get("reason")), Some(&Json::str("all lessons solved; next review 2026-01-12")));
     }
 
     #[test]

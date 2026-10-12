@@ -44,6 +44,9 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .chip { font-size: 12px; font-family: var(--mono); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
 .chip.status { color: var(--ink); border-color: var(--muted); }
 .chip.status.done { color: var(--pass); border-color: var(--pass); }
+.rate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 4px; }
+.rate button { padding: 4px 10px; font-weight: 500; }
+.next { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px; }
 .chip.status.due { color: var(--accent); border-color: var(--accent); font-weight: 700; }
 
 .work { display: flex; flex-direction: column; min-height: 0; }

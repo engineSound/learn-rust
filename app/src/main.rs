@@ -144,9 +144,22 @@ fn profile_of(paths: &Paths, events: &[Json]) -> Json {
             id: l.get("id").and_then(Json::as_str).unwrap_or(&l.slug).to_string(),
             title: l.get("title").and_then(Json::as_str).unwrap_or(&l.slug).to_string(),
             concepts: l.get("concepts").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(String::from).collect(),
+            kind: l.get("kind").and_then(Json::as_str).unwrap_or("core").to_string(),
+            parent: l.get("for").and_then(Json::as_str).map(String::from),
         })
         .collect();
     profile::build_profile(TRACK, &refs, events, &history::now_iso())
+}
+
+/// The profile's next step plus the lesson folder (slug) the UI needs to open it.
+fn next_with_slug(paths: &Paths, profile: &Json) -> Json {
+    let mut next = profile.get("next").cloned().unwrap_or(Json::Null);
+    let id = next.get("lesson_id").cloned();
+    let slug = lessons::list(&paths.lessons).into_iter().find(|l| l.get("id") == id.as_ref()).map(|l| Json::Str(l.slug)).unwrap_or(Json::Null);
+    if let Json::Obj(fields) = &mut next {
+        fields.push(("slug".to_string(), slug));
+    }
+    next
 }
 
 /// History stats for one lesson plus its review schedule from the profile.
@@ -162,14 +175,15 @@ fn stats_for(events: &[Json], profile: &Json, lesson_id: Option<&Json>) -> Json 
     stats
 }
 
-/// After a run or reset: refresh the generated profile block in PROGRESS.md.
-fn refresh_progress(paths: &Paths, lesson_id: Option<&Json>) -> Json {
+/// After a run, reset or rating: refresh the generated profile block in PROGRESS.md.
+/// Returns the lesson's `stats` and the adaptive `next` step.
+fn refresh_progress(paths: &Paths, lesson_id: Option<&Json>) -> Vec<(String, Json)> {
     let events = history::read_events(&paths.events);
     let profile = profile_of(paths, &events);
     if let Err(e) = profile::write_progress(&paths.progress, &profile::profile_markdown(&profile)) {
         eprintln!("couldn't update PROGRESS.md: {e}");
     }
-    stats_for(&events, &profile, lesson_id)
+    vec![("stats".to_string(), stats_for(&events, &profile, lesson_id)), ("next".to_string(), next_with_slug(paths, &profile))]
 }
 
 fn handle(req: &Request, paths: &Paths) -> Response {
@@ -194,6 +208,8 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                     ("title", l.get("title").cloned().unwrap_or_else(|| Json::str(l.slug.clone()))),
                     ("minutes", l.get("minutes").cloned().unwrap_or(Json::Null)),
                     ("concepts", l.get("concepts").cloned().unwrap_or(Json::Arr(vec![]))),
+                    ("kind", l.get("kind").cloned().unwrap_or_else(|| Json::str("core"))),
+                    ("for", l.get("for").cloned().unwrap_or(Json::Null)),
                     ("stats", stats_for(&events, &profile, l.get("id"))),
                 ])
             })
@@ -203,7 +219,8 @@ fn handle(req: &Request, paths: &Paths) -> Response {
     if method == "GET" && path == "/api/profile" {
         let profile = profile_of(paths, &history::read_events(&paths.events));
         let markdown = profile::profile_markdown(&profile);
-        return Response::json(200, Json::obj(vec![("profile", profile), ("markdown", Json::Str(markdown))]));
+        let next = next_with_slug(paths, &profile);
+        return Response::json(200, Json::obj(vec![("profile", profile), ("markdown", Json::Str(markdown)), ("next", next)]));
     }
 
     if let Some(rest) = path.strip_prefix("/api/lessons/") {
@@ -247,8 +264,9 @@ fn handle(req: &Request, paths: &Paths) -> Response {
             ("DELETE", "code") => {
                 fs::remove_file(work_path(paths, &lesson)).ok();
                 log("reset", None, Json::Null);
-                let stats = refresh_progress(paths, id.as_ref());
-                Ok(Response::json(200, Json::obj(vec![("code", Json::str(lesson.starter.clone())), ("stats", stats)])))
+                let mut fields = vec![("code".to_string(), Json::str(lesson.starter.clone()))];
+                fields.extend(refresh_progress(paths, id.as_ref()));
+                Ok(Response::json(200, Json::Obj(fields)))
             }
             ("POST", "run") => save_code(paths, &lesson, &req.body)
                 .and_then(|_| runner::run_lesson(&lesson, &req.body, &paths.data))
@@ -258,10 +276,18 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                     log(kind, duration, history::run_payload(&result, &req.body));
                     let mut result = result;
                     if let Json::Obj(fields) = &mut result {
-                        fields.push(("stats".to_string(), refresh_progress(paths, id.as_ref())));
+                        fields.extend(refresh_progress(paths, id.as_ref()));
                     }
                     Response::json(200, result)
                 }),
+            ("POST", "feedback") => {
+                let difficulty = req.body.trim();
+                if !["easy", "right", "hard"].contains(&difficulty) {
+                    return Response::error(400, "Rate it easy, right or hard");
+                }
+                log("feedback", None, Json::obj(vec![("difficulty", Json::str(difficulty))]));
+                Ok(Response::json(200, Json::Obj(refresh_progress(paths, id.as_ref()))))
+            }
             _ => Ok(Response::error(405, "Method not allowed")),
         };
         return result.unwrap_or_else(|e| Response::error(500, &e.to_string()));

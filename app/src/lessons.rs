@@ -140,6 +140,16 @@ mod tests {
                 assert!(l.get(key).is_some(), "{} is missing {key}", l.slug);
             }
             assert_eq!(l.get("track"), Some(&Json::str("rust")));
+            let kind = l.get("kind").and_then(Json::as_str).unwrap_or("core");
+            assert!(["core", "drill", "stretch"].contains(&kind), "{}: unknown kind {kind}", l.slug);
+            if kind != "core" {
+                let parent = l.get("for");
+                assert!(
+                    lessons.iter().any(|o| o.get("id") == parent && o.get("kind").and_then(Json::as_str).unwrap_or("core") == "core"),
+                    "{}: \"for\" must name a core lesson",
+                    l.slug
+                );
+            }
         }
     }
 }

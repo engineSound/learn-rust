@@ -1,11 +1,13 @@
 // Front end shared by learn-nodejs and learn-rust. Both servers expose the same API:
 //   GET  /api/info                      -> { track, title, accent }
-//   GET  /api/lessons                   -> [{ slug, id, title, minutes, concepts, stats }]
+//   GET  /api/lessons                   -> [{ slug, id, title, minutes, concepts, kind, for, stats }]
 //   GET  /api/lessons/:slug             -> { slug, meta, body, file, code, saved, stats }
 //   PUT  /api/lessons/:slug/code        (text body) -> { saved: true }
-//   DELETE /api/lessons/:slug/code      -> { code, stats }  (back to the starter)
-//   GET  /api/profile                   -> { profile, markdown }
-//   POST /api/lessons/:slug/run         (text body) -> run result + stats
+//   DELETE /api/lessons/:slug/code      -> { code, stats, next }  (back to the starter)
+//   POST /api/lessons/:slug/run         (text body) -> run result + { stats, next }
+//   POST /api/lessons/:slug/feedback    (easy|right|hard) -> { stats, next }
+//   GET  /api/profile                   -> { profile, markdown, next }
+// `next` is the adaptive next step (SHARED-FORMAT.md, section 5) plus its `slug`.
 // `stats` is the learner's history for that lesson (see SHARED-FORMAT.md).
 (function () {
   var $ = function (id) { return document.getElementById(id); };
@@ -42,7 +44,8 @@
   }
   function optionLabel(l) {
     var st = l.stats || {};
-    return (st.due_now ? '↻ ' : st.first_pass_run ? '✓ ' : '') + l.title + ' · ' + (l.minutes || '?') + ' min';
+    var kind = l.kind === 'drill' ? '↳ Drill: ' : l.kind === 'stretch' ? '↳ Stretch: ' : '';
+    return (st.due_now ? '↻ ' : st.first_pass_run ? '✓ ' : '') + kind + l.title + ' · ' + (l.minutes || '?') + ' min';
   }
   function updateStats(stats) {
     current.stats = stats;
@@ -136,9 +139,42 @@
       html.push('<p class="muted small">Run ' + r.stats.runs + ' on this lesson' +
         (firstPass ? ', and your first full pass.' : r.stats.first_pass_run ? ' (first solved on run ' + r.stats.first_pass_run + ').' : '.') + '</p>');
     }
-    if (allOk) html.push('<p>Lesson complete. Add a line to <code>PROGRESS.md</code>: what tripped you up?</p>');
+    if (allOk) {
+      html.push('<div class="rate" id="rate"><span>How was that?</span>' +
+        '<button type="button" class="ghost" data-rate="easy">Too easy</button>' +
+        '<button type="button" class="ghost" data-rate="right">About right</button>' +
+        '<button type="button" class="ghost" data-rate="hard">Too hard</button></div>');
+    }
+    html.push('<div id="next-card"></div>');
     if (r.output) html.push('<details><summary>Full output</summary><pre>' + esc(r.output) + '</pre></details>');
     results.innerHTML = html.join('');
+    showNext(r.next);
+    var rate = $('rate');
+    if (rate) rate.addEventListener('click', function (e) {
+      var d = e.target.getAttribute('data-rate');
+      if (!d || !current) return;
+      api('POST', '/api/lessons/' + current.slug + '/feedback', d).then(function (res) {
+        rate.innerHTML = '<span class="muted">Noted: ' + esc(e.target.textContent.toLowerCase()) + '. Your next step adapts to it.</span>';
+        if (res.stats) updateStats(res.stats);
+        showNext(res.next);
+      });
+    });
+  }
+
+  // The adaptive next step: what to do after this, with a button to open it.
+  function showNext(next) {
+    var card = $('next-card');
+    if (!card || !next) return;
+    if (next.kind === 'done' || !next.slug) {
+      card.innerHTML = '<p class="next"><strong>Next:</strong> ' + esc(next.reason) + '.</p>';
+      return;
+    }
+    if (current && next.slug === current.slug && next.kind !== 'review') { card.innerHTML = ''; return; }
+    var label = { review: 'Review', drill: 'Drill', stretch: 'Stretch', lesson: 'Next lesson' }[next.kind] || 'Next';
+    card.innerHTML = '<div class="next"><div><strong>' + esc(label) + ':</strong> ' + esc(next.title) +
+      '<div class="muted small">' + esc(next.reason) + '</div></div>' +
+      '<button type="button" id="next-btn">Open</button></div>';
+    $('next-btn').addEventListener('click', function () { showLesson(next.slug); });
   }
 
   function run() {
@@ -147,7 +183,7 @@
     results.innerHTML = '<p class="muted">Running tests…</p>';
     clearTimeout(saveTimer);
     api('POST', '/api/lessons/' + current.slug + '/run', code.value)
-      .then(function (r) { renderResult(r); if (r.stats) updateStats(r.stats); saveState.textContent = 'Saved'; })
+      .then(function (r) { if (r.stats) updateStats(r.stats); renderResult(r); saveState.textContent = 'Saved'; })
       .catch(function (e) { results.innerHTML = '<p class="summary bad">Couldn’t run the tests: ' + esc(e.message) + '</p>'; })
       .then(function () { runBtn.disabled = false; runBtn.textContent = 'Run tests'; });
   }
@@ -189,12 +225,12 @@
       return '<option value="' + esc(l.slug) + '">' + esc(optionLabel(l)) + '</option>';
     }).join('');
     if (!lessons.length) { $('lesson').innerHTML = '<p>No lessons found in <code>lessons/</code>.</p>'; return; }
-    // Open a lesson that's due for review first; otherwise where you left off.
-    var due = lessons.filter(function (l) { return l.stats && l.stats.due_now; })
-      .sort(function (a, b) { return a.stats.due < b.stats.due ? -1 : 1; })[0];
-    var saved = recall();
-    var start = due ? due.slug : lessons.some(function (l) { return l.slug === saved; }) ? saved : lessons[0].slug;
-    return showLesson(start);
+    // Open the adaptive next step (a due review, a drill, …); otherwise where you left off.
+    return api('GET', '/api/profile').then(function (p) { return p.next; }, function () { return null; }).then(function (next) {
+      var saved = recall();
+      var start = next && next.slug ? next.slug : lessons.some(function (l) { return l.slug === saved; }) ? saved : lessons[0].slug;
+      return showLesson(start);
+    });
   }).catch(function (e) {
     $('lesson').innerHTML = '<p class="summary bad">Couldn’t reach the server: ' + esc(e.message) + '</p>';
   });
