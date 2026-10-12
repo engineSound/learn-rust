@@ -2,6 +2,7 @@
 id: rust-01-bindings-expressions
 track: rust
 title: Bindings and expressions
+topic: Bindings & expressions
 minutes: 20
 concepts: [cargo, let-mut, shadowing, expressions, integer-types]
 prereqs: []
@@ -11,46 +12,70 @@ edit: src/lib.rs
 
 # Bindings and expressions
 
-## Coming from Java
+## Learn the idea
 
-| Java | Rust |
-|------|------|
-| `int x = 1;` (mutable) | `let x = 1;` (**immutable** by default) |
-| `int x = 1; x++;` | `let mut x = 1; x += 1;` |
-| `final` | the default; `mut` is the exception you opt into |
-| `int`, `long` | `i32`, `i64`, `u32`, `usize`… sizes are explicit, no silent widening |
-| `cond ? a : b` | `if cond { a } else { b }`, since `if` is an expression |
-| `return x;` | the last expression in a block, **without** `;`, is its value |
-| `mvn test` / `gradle test` | `cargo test` |
+You're writing the firmware helpers for a small fleet of home devices. Rust starts with two habits that differ from Java.
 
-## Expressions, not statements
-Blocks and `if` produce values:
+**1. Everything is immutable unless you say `mut`.** `let x = 1;` is like Java's `final int x = 1;`. To change it: `let mut x = 1; x += 1;`
+
+**2. `if` and blocks are expressions.** They produce values, like Java's `cond ? a : b`. The last line of a block, **without a semicolon**, is its value, so functions don't need `return`:
 
 ```rust
-let sign = if n < 0 { "negative" } else { "non-negative" };
-fn square(x: i32) -> i32 { x * x }   // no `return`, no `;`
+fn square(x: i32) -> i32 {
+    x * x          // no `;` → this is the return value
+}
 ```
 
-Add a `;` after `x * x` and the function returns `()` (nothing). The
-compiler then reports a type mismatch, `E0308`. That's one of the most
-common beginner errors, so expect to see it.
+Add a `;` after `x * x` and the function returns `()` (nothing). The compiler then reports **E0308**, mismatched types. It's the most common beginner error, so expect it.
 
-## Shadowing
-You can declare a new binding with the same name, even with a new type:
+Change the reading below and press **Run**:
 
-```rust
-let input = " 42 ";
-let input = input.trim();              // still &str
-let input: i64 = input.parse().unwrap(); // now an i64
+```run
+let reading = 23;
+let status = if reading > 25 { "hot" } else { "fine" };
+println!("{reading}°C is {status}");
+
+let mut count = 0;
+count += 1;
+println!("readings so far: {count}");
 ```
 
-This differs from `mut`: each `let` creates a new variable. It's idiomatic
-for parse-and-convert steps.
+**Shadowing:** you can declare a *new* binding with the same name, even with a new type, which is handy for parse-and-convert steps: `let s = s.trim(); let s: i64 = s.parse().unwrap();`
 
-## No implicit numeric conversion
-`let total: u64 = some_u32;` doesn't compile. Convert explicitly:
-`some_u32 as u64` or `u64::from(some_u32)`.
+## Quick check
 
-## Exercise
-Open `src/lib.rs`, replace each `todo!()`, and run `cargo test` in this
-folder. Read the compiler's messages fully; they usually tell you the fix.
+```predict
+let x = 5;
+let x = x * 2;
+{
+    let x = 0;
+}
+println!("{x}");
+---
+options: 0 | 5 | 10
+answer: 10
+why: The second `let x` shadows the first (10). The `let x = 0` inside the braces is a separate binding that disappears at the `}`.
+```
+
+## Your turn
+
+Four small device helpers in the editor: convert Celsius to Fahrenheit, classify a number, sum the even numbers up to `n`, and parse-and-double a text value. Each `///` comment says exactly what to return. Replace each `todo!()`.
+
+## Example
+
+```
+celsius_to_fahrenheit(100.0)  →  212.0
+classify(-7)                  →  "negative"
+sum_of_evens(10)              →  30
+parse_and_double(" 21 ")      →  42
+```
+
+## Hints
+
+1. `celsius_to_fahrenheit` is one expression: `c * 9.0 / 5.0 + 32.0`, with no `;`.
+2. `classify`: `if n < 0 { "negative" } else if n == 0 { "zero" } else { "positive" }`. The whole `if` is the return value.
+3. `sum_of_evens`: `let mut total: u64 = 0;`, loop `for i in 0..=n`, add `i as u64` when `i % 2 == 0`, and end with `total`.
+
+## Review
+
+Tomorrow, solve this again, then add a `;` after one return expression on purpose and read what E0308 says.

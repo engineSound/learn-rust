@@ -11,23 +11,24 @@ Each exercise is a folder named `lessons/NN-slug/` with:
 
 | File | Purpose |
 |------|---------|
-| `lesson.md` | YAML front matter (below) + a short explanation, ~5 minutes of reading |
+| `lesson.md` | YAML front matter (below) + the sections below: learn, check, do |
 | exercise file(s) | Starter code with `TODO`s for the learner to fill in |
 | test file(s) | Tests that decide pass/fail; the app only runs these |
 
 Front matter:
 
 ```yaml
-id: node-01-values-functions   # <track>-<NN>-<slug>, globally unique
+id: node-03-battery-low        # <track>-<NN>-<slug>, globally unique
 track: nodejs                  # nodejs | rust | (future languages)
-title: Values, equality and functions
-minutes: 20                    # target length of one short daily session
-concepts: [equality, let-const, arrow-functions, array-methods]
-prereqs: []                    # lesson ids
+title: Decide when a battery is low
+topic: Conditions & booleans   # short label for the outline
+minutes: 8                     # target time for this exercise
+concepts: [conditions, equality, booleans]
+prereqs: [node-02-convert-temperature]   # lesson ids
 contrast: java                 # language the explanation compares against
 edit: exercise.js              # the file the learner edits (Rust: src/lib.rs)
 kind: core                     # core (default) | drill | stretch
-for: node-01-values-functions  # drills and stretches only: the core lesson they practise
+for: node-03-battery-low       # drills and stretches only (not on a core lesson): the core lesson they practise
 generated: true                # only on drills written by the tutor (section 6)
 targets: One sentence on what the drill aims at   # generated drills only
 ```
@@ -41,6 +42,45 @@ core lesson should have:
 
 Name them after their core lesson so they sort next to it: `01a-drill-…`,
 `01b-stretch-…`, then `02-…`. Section 5 says when each is offered.
+
+**Lesson body: learn first, then do.** The app shows every exercise as up to
+three numbered steps, *The idea* → *Quick check* → *Your turn*, built from
+these `##` sections of `lesson.md` (in this order):
+
+| Section | Shown as | Content |
+|---------|----------|---------|
+| `## Learn the idea` (`## Recall` for drills and stretches) | step 1 | 2–4 short paragraphs, a Java contrast, and at least one ```run block |
+| `## Quick check` | step 2 | one ```predict block (optional for drills) |
+| `## Your turn` | step 3 | what to write, in one or two sentences |
+| `## Example` | inside step 3 | calls and results: `name(args)  →  result` |
+| `## Hints` | under a failed run, one at a time | a numbered list of 3, from a nudge to nearly the answer (required for core lessons) |
+| `## Review` | after a pass | what to do when it comes back for review |
+
+Front matter also takes `topic:` (a short label for the outline, e.g.
+`Conditions & booleans`). One exercise teaches **one practical skill** in
+about 8 minutes: one function (two at most), set in the running
+device-and-service story, with test names written as plain sentences.
+
+Two special code blocks:
+
+````
+```run
+console.log("an example the learner can edit and run");
+```
+
+```predict
+console.log(0 == "");
+---
+options: true | false
+answer: true
+why: `==` converts the empty string to 0 first.
+```
+````
+
+`run` blocks are editable and run with `POST /api/snippet` (Node: an ES
+module; Rust: the body of `fn main` unless it defines one). In `predict`
+blocks the learner picks an option before seeing the answer; the answer
+must be exactly what the code prints (both apps' checks run every block).
 
 `concepts` are the unit the tutor tracks. Name them in lowercase kebab-case
 and reuse names across tracks when the idea is the same (e.g. `closures`,
@@ -62,6 +102,9 @@ Both apps serve the same JSON API, and `app/public/` (the browser UI) is
 | `POST /api/lessons/:slug/run` | code as plain text | run result (below) plus `stats`, `next` |
 | `POST /api/lessons/:slug/feedback` | `easy`, `right` or `hard` | `{ stats, next }` |
 | `GET /api/profile` | | `{ profile, markdown, next }` (section 4) |
+| `GET /api/history` | | events, newest first, without `lesson_open` and without code |
+| `POST /api/snippet` | JSON `{ code }` | `{ output, ok, errors, timedOut }`: runs a ```run / ```predict block |
+| `POST /api/lessons/:slug/log` | JSON `{ kind: "hint" \| "predict", payload }` | `{ ok }`: records a hint shown or a quick-check answer |
 | `POST /api/lessons/:slug/hint` | JSON `{ code, question }` | `{ hint }` (Markdown; section 6) |
 | `POST /api/lessons/:slug/drill` | | `{ slug, id, title, targets, attempts, stats, next }`: a new verified drill (section 6) |
 
@@ -72,9 +115,12 @@ Tutor errors come back as `{ error }` with status 401 (key rejected), 429
 `next` is the adaptive next step (section 5) with the `slug` of its lesson
 folder added, or `slug: null`.
 
-Run result: `{ passed, failed, total, tests: [{ name, ok, message }],
+Run result: `{ passed, failed, total, tests: [{ name, ok, message, expected?, actual? }],
 compileErrors: [{ code, title, message }], timedOut, durationMs, output }`.
 `compileErrors[].code` is a compiler error code such as `E0308`, or `null`.
+`expected` / `actual` are display strings taken from a failed equality
+assertion (Node's TAP output; Rust's `assert_eq!` left/right), shown to the
+learner as "Expected … Got …".
 
 The learner's code is saved to `data/work/<slug>/<edit file>` (gitignored).
 
@@ -114,7 +160,8 @@ Run payload: `{ passed, failed, total, failing: [test names],
 errors: [compiler error codes or titles], timed_out, code }`. `code` is
 what was run, capped at 64 KB.
 
-| `hint` | the tutor gave a hint | `{ question: string \| null }` |
+| `hint` | a hint was shown | `{ source: "lesson" \| "tutor", level?: number, question: string \| null }` |
+| `predict` | a quick-check answer | `{ question: number, correct: boolean }` |
 | `generated` | the tutor wrote a new drill (`lesson_id` is the new drill) | `{ for, targets, attempts }` |
 
 Reviews aren't a separate kind: a passing run on a lesson that's due counts as a review. Sessions aren't recorded as events; a session is

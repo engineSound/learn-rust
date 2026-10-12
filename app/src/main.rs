@@ -266,7 +266,7 @@ fn handle(req: &Request, paths: &Paths) -> Response {
     if method == "GET" && path == "/api/info" {
         return Response::json(
             200,
-            Json::obj(vec![("track", Json::str("rust")), ("title", Json::str("Learn Rust")), ("accent", Json::str("#b4470f")), ("tutor", tutor::status())]),
+            Json::obj(vec![("track", Json::str("rust")), ("title", Json::str("Rust Lab")), ("accent", Json::str("#b4470f")), ("tutor", tutor::status())]),
         );
     }
     if method == "GET" && path == "/api/lessons" {
@@ -283,8 +283,36 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                     ("concepts", l.get("concepts").cloned().unwrap_or(Json::Arr(vec![]))),
                     ("kind", l.get("kind").cloned().unwrap_or_else(|| Json::str("core"))),
                     ("for", l.get("for").cloned().unwrap_or(Json::Null)),
+                    ("topic", l.get("topic").cloned().unwrap_or(Json::Null)),
                     ("stats", stats_for(&events, &profile, l.get("id"))),
                 ])
+            })
+            .collect();
+        return Response::json(200, Json::Arr(list));
+    }
+    if method == "POST" && path == "/api/snippet" {
+        let body = json::parse(if req.body.trim().is_empty() { "{}" } else { &req.body }).unwrap_or(Json::Obj(vec![]));
+        let code = body.get("code").and_then(Json::as_str).unwrap_or("").to_string();
+        return runner::run_snippet(&code, &paths.data).map(|r| Response::json(200, r)).unwrap_or_else(|e| Response::error(500, &e.to_string()));
+    }
+    if method == "GET" && path == "/api/history" {
+        let events = history::read_events(&paths.events);
+        let list: Vec<Json> = events
+            .iter()
+            .rev()
+            .filter(|e| e.get("kind").and_then(Json::as_str) != Some("lesson_open"))
+            .take(300)
+            .map(|e| match e {
+                Json::Obj(fields) => Json::Obj(
+                    fields
+                        .iter()
+                        .map(|(k, v)| match (k.as_str(), v) {
+                            ("payload", Json::Obj(p)) => (k.clone(), Json::Obj(p.iter().filter(|(pk, _)| pk != "code").cloned().collect())),
+                            _ => (k.clone(), v.clone()),
+                        })
+                        .collect(),
+                ),
+                other => other.clone(),
             })
             .collect();
         return Response::json(200, Json::Arr(list));
@@ -372,7 +400,7 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                     match tutor::hint(&ctx, &title, &lesson.body, &lesson.file, &code, Some(&result), &question) {
                         Ok(text) => {
                             let q = if question.trim().is_empty() { Json::Null } else { Json::str(question.trim()) };
-                            log("hint", None, Json::obj(vec![("question", q)]));
+                            log("hint", None, Json::obj(vec![("source", Json::str("tutor")), ("question", q)]));
                             Response::json(200, Json::obj(vec![("hint", Json::Str(text))]))
                         }
                         Err(e) => tutor_error(e),
@@ -380,6 +408,23 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                 })
             }
             ("POST", "drill") => Ok(make_drill(paths, &lesson)),
+            ("POST", "log") => {
+                let body = json::parse(if req.body.trim().is_empty() { "{}" } else { &req.body }).unwrap_or(Json::Obj(vec![]));
+                let p = body.get("payload").cloned().unwrap_or(Json::Obj(vec![]));
+                let num = |k: &str| p.get(k).and_then(Json::as_f64).map(Json::Num).unwrap_or(Json::Null);
+                match body.get("kind").and_then(Json::as_str) {
+                    Some("hint") => {
+                        log("hint", None, Json::obj(vec![("source", Json::str("lesson")), ("level", num("level")), ("question", Json::Null)]));
+                        Ok(Response::json(200, Json::obj(vec![("ok", Json::Bool(true))])))
+                    }
+                    Some("predict") => {
+                        let correct = p.get("correct").and_then(Json::as_bool) == Some(true);
+                        log("predict", None, Json::obj(vec![("question", num("question")), ("correct", Json::Bool(correct))]));
+                        Ok(Response::json(200, Json::obj(vec![("ok", Json::Bool(true))])))
+                    }
+                    _ => Ok(Response::error(400, "Only hint and predict can be logged")),
+                }
+            }
             _ => Ok(Response::error(405, "Method not allowed")),
         };
         return result.unwrap_or_else(|e| Response::error(500, &e.to_string()));

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_OUTPUT: usize = 200_000;
+const SNIPPET_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// One run at a time: runs share the scratch folder and the target directory.
 static RUN_LOCK: Mutex<()> = Mutex::new(());
@@ -24,6 +25,10 @@ pub struct TestResult {
     pub name: String,
     pub ok: bool,
     pub message: String,
+    /// From `assert_eq!(actual, expected)`: the `right` value.
+    pub expected: Option<String>,
+    /// From `assert_eq!(actual, expected)`: the `left` value.
+    pub actual: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -50,32 +55,7 @@ pub fn run_lesson(lesson: &Lesson, code: &str, data_dir: &Path) -> std::io::Resu
     fs::write(scratch.join(&lesson.file), code)?;
 
     let started = Instant::now();
-    let mut child = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
-        .args(["test", "--color", "never"])
-        .current_dir(&scratch)
-        .env("CARGO_TARGET_DIR", data_dir.join("target"))
-        .env("CARGO_TERM_COLOR", "never")
-        .env("RUST_BACKTRACE", "0")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let out = read_async(child.stdout.take());
-    let err = read_async(child.stderr.take());
-    let mut timed_out = false;
-    loop {
-        if child.try_wait()?.is_some() {
-            break;
-        }
-        if started.elapsed() > TIMEOUT {
-            timed_out = true;
-            child.kill().ok();
-            child.wait().ok();
-            break;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    let stdout = out.join().unwrap_or_default();
-    let stderr = err.join().unwrap_or_default();
+    let (stdout, stderr, timed_out, _) = cargo(&["test", "--color", "never"], &scratch, data_dir, TIMEOUT)?;
     let duration_ms = started.elapsed().as_millis() as f64;
 
     let tests = parse_tests(&stdout);
@@ -93,7 +73,14 @@ pub fn run_lesson(lesson: &Lesson, code: &str, data_dir: &Path) -> std::io::Resu
             Json::Arr(
                 tests
                     .into_iter()
-                    .map(|t| Json::obj(vec![("name", Json::Str(t.name)), ("ok", Json::Bool(t.ok)), ("message", Json::Str(t.message))]))
+                    .map(|t| {
+                        let mut fields = vec![("name", Json::Str(t.name)), ("ok", Json::Bool(t.ok)), ("message", Json::Str(t.message))];
+                        if t.expected.is_some() || t.actual.is_some() {
+                            fields.push(("expected", Json::Str(t.expected.unwrap_or_default())));
+                            fields.push(("actual", Json::Str(t.actual.unwrap_or_default())));
+                        }
+                        Json::obj(fields)
+                    })
                     .collect(),
             ),
         ),
@@ -115,6 +102,71 @@ pub fn run_lesson(lesson: &Lesson, code: &str, data_dir: &Path) -> std::io::Resu
         ("timedOut", Json::Bool(timed_out)),
         ("durationMs", Json::Num(duration_ms)),
         ("output", Json::Str(output)),
+    ]))
+}
+
+/// Run cargo in `dir` with a shared target directory and a timeout.
+/// Returns (stdout, stderr, timed_out, succeeded).
+fn cargo(args: &[&str], dir: &Path, data_dir: &Path, timeout: Duration) -> std::io::Result<(String, String, bool, bool)> {
+    let started = Instant::now();
+    let mut child = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+        .args(args)
+        .current_dir(dir)
+        .env("CARGO_TARGET_DIR", data_dir.join("target"))
+        .env("CARGO_TERM_COLOR", "never")
+        .env("RUST_BACKTRACE", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let out = read_async(child.stdout.take());
+    let err = read_async(child.stderr.take());
+    let mut timed_out = false;
+    let mut succeeded = false;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            succeeded = status.success();
+            break;
+        }
+        if started.elapsed() > timeout {
+            timed_out = true;
+            child.kill().ok();
+            child.wait().ok();
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    Ok((out.join().unwrap_or_default(), err.join().unwrap_or_default(), timed_out, succeeded))
+}
+
+/// Run a small example from a lesson (```run blocks). Code without `fn main` is wrapped in one.
+pub fn run_snippet(code: &str, data_dir: &Path) -> std::io::Result<Json> {
+    let _guard = RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = data_dir.join("snippet");
+    fs::create_dir_all(dir.join("src"))?;
+    fs::write(dir.join("Cargo.toml"), "[package]\nname = \"snippet\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n")?;
+    let main = if code.contains("fn main") { code.to_string() } else { format!("fn main() {{\n{code}\n}}\n") };
+    fs::write(dir.join("src/main.rs"), main)?;
+    let (stdout, stderr, timed_out, ok) = cargo(&["run", "--quiet", "--color", "never"], &dir, data_dir, SNIPPET_TIMEOUT)?;
+    let errors = parse_errors(&stderr);
+    let mut output = stdout;
+    if !ok && errors.is_empty() {
+        // A runtime panic: show it after the program's own output.
+        let panic = stderr.find("thread 'main'").map(|i| &stderr[i..]).unwrap_or(&stderr);
+        output.push_str(panic.lines().filter(|l| !l.starts_with("note: ")).collect::<Vec<_>>().join("\n").trim());
+    }
+    Ok(Json::obj(vec![
+        ("output", Json::Str(output)),
+        ("ok", Json::Bool(ok && !timed_out)),
+        (
+            "errors",
+            Json::Arr(
+                errors
+                    .into_iter()
+                    .map(|d| Json::obj(vec![("code", d.code.map(Json::Str).unwrap_or(Json::Null)), ("title", Json::Str(d.title)), ("message", Json::Str(d.message))]))
+                    .collect(),
+            ),
+        ),
+        ("timedOut", Json::Bool(timed_out)),
     ]))
 }
 
@@ -166,7 +218,7 @@ pub fn parse_tests(stdout: &str) -> Vec<TestResult> {
                 "FAILED" => false,
                 _ => return None,
             };
-            Some(TestResult { name: name.to_string(), ok, message: String::new() })
+            Some(TestResult { name: name.to_string(), ok, message: String::new(), expected: None, actual: None })
         })
         .collect();
 
@@ -177,6 +229,9 @@ pub fn parse_tests(stdout: &str) -> Vec<TestResult> {
         if let Some(name) = name {
             if let Some(t) = tests.iter_mut().find(|t| &t.name == name) {
                 t.message = clean_panic(buf);
+                let value = |prefix: &str| buf.iter().find_map(|l| l.trim().strip_prefix(prefix).map(|v| v.trim().to_string()));
+                t.actual = value("left:");
+                t.expected = value("right:");
             }
         }
         buf.clear();
@@ -287,10 +342,33 @@ test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; 
         assert_eq!(
             parse_tests(STDOUT),
             vec![
-                TestResult { name: "adds numbers".into(), ok: true, message: String::new() },
-                TestResult { name: "subtracts".into(), ok: false, message: "panicked at src/lib.rs:13:5:\nnot yet implemented".into() },
+                TestResult { name: "adds numbers".into(), ok: true, message: String::new(), expected: None, actual: None },
+                TestResult { name: "subtracts".into(), ok: false, message: "panicked at src/lib.rs:13:5:\nnot yet implemented".into(), expected: None, actual: None },
             ]
         );
+    }
+
+    #[test]
+    fn assert_eq_failures_give_expected_and_got() {
+        let out = "test tests::f ... FAILED\n\nfailures:\n\n---- tests::f stdout ----\n\nthread 'tests::f' (7) panicked at src/lib.rs:3:5:\nassertion `left == right` failed\n  left: 32.0\n right: 33.0\n\nfailures:\n";
+        let t = &parse_tests(out)[0];
+        assert_eq!((t.actual.as_deref(), t.expected.as_deref()), (Some("32.0"), Some("33.0")));
+    }
+
+    #[test]
+    fn snippets_run_wrapped_in_main_and_report_errors_and_panics() {
+        let data = std::env::temp_dir().join(format!("learn-snippet-test-{}", std::process::id()));
+        let field = |j: &Json, k: &str| j.get(k).cloned().unwrap();
+        let ok = run_snippet("let x = 2;\nprintln!(\"x = {}\", x * 21);", &data).unwrap();
+        assert_eq!(field(&ok, "ok"), Json::Bool(true));
+        assert_eq!(field(&ok, "output"), Json::str("x = 42\n"));
+        let broken = run_snippet("let x: i32 = \"text\";", &data).unwrap();
+        assert_eq!(field(&broken, "ok"), Json::Bool(false));
+        assert!(broken.to_string().contains("E0308"));
+        let panics = run_snippet("let v: Vec<i32> = vec![];\nprintln!(\"{}\", v[3]);", &data).unwrap();
+        assert_eq!(field(&panics, "ok"), Json::Bool(false));
+        assert!(field(&panics, "output").as_str().unwrap().contains("index out of bounds"));
+        fs::remove_dir_all(&data).ok();
     }
 
     #[test]

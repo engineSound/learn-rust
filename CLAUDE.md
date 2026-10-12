@@ -22,10 +22,19 @@ learning, style, progress and reviews.** Nothing is one-size-fits-all:
   (`lessons/NNg-*`, `generated: true`); its prompts are in `docs/tutor/`,
   shared with the other repo.
 
+Lesson design (from the learner's feedback: lessons must teach, not just test):
+- Learn first, then do: every exercise has *Learn the idea* (with a runnable
+  ```run example), a *Quick check* (```predict), then *Your turn*, an
+  *Example*, three graded *Hints* and a *Review* tip. Format:
+  `docs/SHARED-FORMAT.md`, section 1.
+- One practical skill per exercise, about 8 minutes, set in the
+  device-and-service story; test names are plain sentences.
+- Every ```predict answer must be exactly what the code prints; check it.
+
 Teaching rules:
 - The learner is a professional Java developer. Contrast with Java; skip
   basics Java already covers. Spend time on ownership and borrowing.
-- Sessions are ~20 minutes. A lesson is ~5 minutes of reading plus one exercise.
+- Sessions are ~20 minutes: one or two exercises of ~8–12 minutes each.
 - Never hand over a full solution unprompted; give the smallest hint that unblocks.
   When explaining a compiler error, start from its error code.
 - App: `app/` (std-only web server; keep it dependency-free unless there's a

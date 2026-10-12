@@ -141,6 +141,13 @@ mod tests {
             }
             assert_eq!(l.get("track"), Some(&Json::str("rust")));
             let kind = l.get("kind").and_then(Json::as_str).unwrap_or("core");
+            // Learn first: every exercise explains before it tests (docs/SHARED-FORMAT.md, section 1).
+            let has = |h: &str| l.body.lines().any(|line| line.trim_end() == h);
+            assert!(has("## Learn the idea") || has("## Recall"), "{} needs a \"## Learn the idea\" (or \"## Recall\") section", l.slug);
+            assert!(has("## Your turn"), "{} needs a \"## Your turn\" section", l.slug);
+            if kind == "core" {
+                assert!(has("## Hints"), "{} needs a \"## Hints\" section", l.slug);
+            }
             assert!(["core", "drill", "stretch"].contains(&kind), "{}: unknown kind {kind}", l.slug);
             if kind != "core" {
                 let parent = l.get("for");

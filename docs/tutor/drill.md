@@ -17,8 +17,15 @@ Concepts of that lesson: {{parent_concepts}}
 ## Requirements
 
 - A *new* exercise: different functions and data from the existing ones, so the learner recalls ideas instead of code.
-- About 10 minutes for this learner: 2 or 3 small functions, focused on the target.
-- `explanation` is the Markdown body of the lesson page (no front matter): a heading starting "# Drill:", 3–6 short bullet points recalling the idea with a Java contrast where useful, then "## Exercise" with one or two sentences. Don't reveal the solution.
+- About 8 minutes for this learner: one small function (two at most), focused on the target, with a practical device or service flavour.
+- `explanation` is the Markdown body of the lesson page (no front matter), in exactly these sections:
+  - `# <title>`
+  - `## Recall`: 3–5 short bullet points recalling the idea, with a Java contrast where useful, and optionally one runnable example in a ```run block (complete, prints something, runs on its own).
+  - `## Quick check`: one ```predict block: a few lines of code that print one line, then a line `---`, then `options: a | b | c` (2–3 choices, exactly as printed), `answer: <the exact printed line>` and `why: <one sentence>`.
+  - `## Your turn`: one or two sentences saying what to write.
+  - `## Example`: a ``` block of calls and results, like `name(args)  →  result`.
+  - `## Hints`: a numbered list of 3 hints, from a gentle nudge to nearly the answer, never the full code.
+  Don't reveal the solution anywhere in the explanation.
 - `concepts`: one to three names taken only from this list: {{parent_concepts}}.
 - `slug`: 2–4 lowercase words joined by hyphens, describing the drill.
 - `targets`: one sentence saying which mistake or concept this drill targets and why.
