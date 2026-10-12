@@ -392,11 +392,11 @@ error: could not compile `lesson` (lib test) due to 1 previous error
         assert!(errs[0].message.contains("remove this semicolon"));
     }
 
-    /// End to end: copies lesson 01, runs real `cargo test`, and reads the results.
+    /// End to end: copies lesson 02, runs real `cargo test`, and reads the results.
     #[test]
-    fn runs_lesson_01_starter_broken_and_solved() {
+    fn runs_lesson_02_starter_broken_and_solved() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        let lesson = crate::lessons::load(&root.join("lessons"), "01-bindings-expressions").unwrap().unwrap();
+        let lesson = crate::lessons::load(&root.join("lessons"), "02-convert-temperature").unwrap().unwrap();
         let data = std::env::temp_dir().join(format!("learn-rust-test-{}", std::process::id()));
         let field = |j: &Json, key: &str| match j {
             Json::Obj(f) => f.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()).unwrap(),
@@ -409,21 +409,20 @@ error: could not compile `lesson` (lib test) due to 1 previous error
 
         let starter = run_lesson(&lesson, &lesson.starter, &data).unwrap();
         assert_eq!(field(&starter, "passed"), Json::Num(0.0));
-        assert_eq!(field(&starter, "total"), Json::Num(6.0));
+        assert_eq!(field(&starter, "total"), Json::Num(4.0));
 
-        let broken = lesson.starter.replacen("    todo!()", "    c * 9.0 / 5.0 + 32.0;", 1);
+        let broken = lesson.starter.replacen("    todo!()", "    celsius * 9.0 / 5.0 + 32.0;", 1);
         let r = run_lesson(&lesson, &broken, &data).unwrap();
         assert_eq!(len(field(&r, "compileErrors")), 1, "{}", r.to_string());
         assert!(r.to_string().contains("E0308"));
 
-        let solved = lesson
-            .starter
-            .replacen("    todo!()", "    c * 9.0 / 5.0 + 32.0", 1)
-            .replacen("    todo!()", r#"    if n < 0 { "negative" } else if n == 0 { "zero" } else { "positive" }"#, 1)
-            .replacen("    todo!()", "    let mut t: u64 = 0; for i in 0..=n { if i % 2 == 0 { t += i as u64; } } t", 1)
-            .replacen("    todo!()", "    let s = s.trim(); let s: i64 = s.parse().unwrap(); s * 2", 1);
+        let unrounded = lesson.starter.replacen("    todo!()", "    celsius * 9.0 / 5.0 + 32.0", 1);
+        let r = run_lesson(&lesson, &unrounded, &data).unwrap();
+        assert_eq!(field(&r, "passed"), Json::Num(3.0), "{}", r.to_string());
+
+        let solved = lesson.starter.replacen("    todo!()", "    ((celsius * 9.0 / 5.0 + 32.0) * 10.0).round() / 10.0", 1);
         let r = run_lesson(&lesson, &solved, &data).unwrap();
-        assert_eq!(field(&r, "passed"), Json::Num(6.0), "{}", r.to_string());
+        assert_eq!(field(&r, "passed"), Json::Num(4.0), "{}", r.to_string());
         assert_eq!(field(&r, "failed"), Json::Num(0.0));
         fs::remove_dir_all(&data).ok();
     }

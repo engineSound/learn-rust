@@ -7,21 +7,49 @@ name = "learn-app"
 version = "0.1.0"
 
 [[package]]
-name = "lesson-01-bindings-expressions"
+name = "lesson-01-first-function"
 version = "0.1.0"
 
 [[package]]
-name = "lesson-01a-drill-expressions"
+name = "lesson-02-convert-temperature"
 version = "0.1.0"
 
 [[package]]
-name = "lesson-01b-stretch-loops"
+name = "lesson-02a-drill-expressions"
 version = "0.1.0"
 
 [[package]]
-name = "lesson-02-types-functions"
+name = "lesson-02b-stretch-loops"
 version = "0.1.0"
 
 [[package]]
-name = "lesson-03-ownership"
+name = "lesson-03-battery-low"
+version = "0.1.0"
+
+[[package]]
+name = "lesson-04-active-devices"
+version = "0.1.0"
+
+[[package]]
+name = "lesson-05-incoming-message"
+version = "0.1.0"
+
+[[package]]
+name = "lesson-06-ownership"
+version = "0.1.0"
+
+[[package]]
+name = "lesson-07-device-status"
+version = "0.1.0"
+
+[[package]]
+name = "lesson-08-count-readings"
+version = "0.1.0"
+
+[[package]]
+name = "lesson-09-format-reading"
+version = "0.1.0"
+
+[[package]]
+name = "lesson-10-daily-summary"
 version = "0.1.0"

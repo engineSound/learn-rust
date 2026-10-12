@@ -1,0 +1,4 @@
+[package]
+name = "lesson-04-active-devices"
+version = "0.1.0"
+edition = "2021"

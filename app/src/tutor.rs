@@ -527,7 +527,7 @@ mod tests {
     }
 
     fn parent() -> Parent {
-        let l = crate::lessons::load(&root().join("lessons"), "01-bindings-expressions").unwrap().unwrap();
+        let l = crate::lessons::load(&root().join("lessons"), "02-convert-temperature").unwrap().unwrap();
         Parent {
             id: l.get("id").and_then(Json::as_str).unwrap().into(),
             slug: l.slug.clone(),
@@ -557,7 +557,7 @@ mod tests {
         Json::obj(vec![
             ("title", Json::str("Totals without surprises")),
             ("slug", Json::str("Totals Without Surprises")),
-            ("concepts", Json::Arr(vec![Json::str("expressions"), Json::str("integer-types"), Json::str("not-here")])),
+            ("concepts", Json::Arr(vec![Json::str("numbers"), Json::str("shadowing"), Json::str("not-here")])),
             ("minutes", Json::Num(8.0)),
             ("targets", Json::str("Sums of empty slices: #1 mistake so far.")),
             ("explanation", Json::str("# Drill: totals\n\n- sum of nothing is 0\n\n## Exercise\nTwo functions.")),
@@ -618,10 +618,10 @@ mod tests {
         let made = generate_drill(&context(&dir), &parent(), "(none)", "- E0308 ×3").unwrap();
         let again = generate_drill(&context(&dir), &parent(), "", "").unwrap();
         set_transport_for_tests(None);
-        assert_eq!(made.slug, "01g-totals-without-surprises");
-        assert_eq!(made.id, "rust-01g-totals-without-surprises");
+        assert_eq!(made.slug, "02g-totals-without-surprises");
+        assert_eq!(made.id, "rust-02g-totals-without-surprises");
         assert_eq!(made.attempts, 1);
-        assert_eq!(again.slug, "01g-totals-without-surprises-2");
+        assert_eq!(again.slug, "02g-totals-without-surprises-2");
         let req = seen.lock().unwrap()[0].clone();
         let oc = req.get("output_config").unwrap();
         assert_eq!(oc.get("effort"), Some(&Json::str("high")));
@@ -631,11 +631,11 @@ mod tests {
 
         let saved = crate::lessons::load(&dir.join("lessons"), &made.slug).unwrap().unwrap();
         assert_eq!(saved.get("kind"), Some(&Json::str("drill")));
-        assert_eq!(saved.get("for"), Some(&Json::str("rust-01-bindings-expressions")));
-        assert_eq!(saved.get("concepts"), Some(&Json::Arr(vec![Json::str("expressions"), Json::str("integer-types")])));
+        assert_eq!(saved.get("for"), Some(&Json::str("rust-02-convert-temperature")));
+        assert_eq!(saved.get("concepts"), Some(&Json::Arr(vec![Json::str("numbers"), Json::str("shadowing")])));
         assert_eq!(saved.get("targets"), Some(&Json::str("Sums of empty slices: 1 mistake so far.")));
         assert!(saved.starter.contains("todo!()") && saved.starter.contains("fn total_adds"));
-        assert!(fs::read_to_string(dir.join("lessons").join(&made.slug).join("Cargo.toml")).unwrap().contains("lesson-01g-totals-without-surprises"));
+        assert!(fs::read_to_string(dir.join("lessons").join(&made.slug).join("Cargo.toml")).unwrap().contains("lesson-02g-totals-without-surprises"));
         assert!(dir.join("data/solutions").join(&made.slug).join("lib.rs").exists());
         fs::remove_dir_all(&dir).ok();
     }

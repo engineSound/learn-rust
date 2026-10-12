@@ -36,7 +36,7 @@ appear with their codes (like `E0308`). Your code is saved as you type, in
 `cargo test` at the repo root tests the app itself (lesson tests are meant to
 fail until you solve them).
 
-Without the app: `cd lessons/01-bindings-expressions && cargo test`.
+Without the app: `cd lessons/01-first-function && cargo test`.
 
 ## The tutor (optional)
 

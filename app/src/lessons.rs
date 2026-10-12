@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn slugs_reject_path_tricks() {
-        assert!(valid_slug("01-bindings-expressions"));
+        assert!(valid_slug("02-convert-temperature"));
         assert!(!valid_slug("../app"));
         assert!(!valid_slug(""));
         assert!(!valid_slug("Lesson"));
@@ -158,6 +158,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Every ```run example compiles and runs: the learner's first try must work.
+    #[test]
+    fn every_run_example_runs() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lessons");
+        let data = std::env::temp_dir().join(format!("learn-run-test-{}", std::process::id()));
+        let mut count = 0;
+        for l in list(&dir) {
+            for block in l.body.split("```run\n").skip(1) {
+                let code = block.split("\n```").next().unwrap();
+                let r = crate::runner::run_snippet(code, &data).unwrap();
+                assert_eq!(r.get("ok").and_then(Json::as_bool), Some(true), "{}: the example doesn't run: {}", l.slug, r.to_string());
+                count += 1;
+            }
+        }
+        std::fs::remove_dir_all(&data).ok();
+        assert!(count >= 10, "expected examples in the lessons, found {count}");
+    }
+
+    /// Every ```predict answer is one of its options and exactly what the code prints.
+    #[test]
+    fn every_quick_check_answer_is_what_the_code_prints() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lessons");
+        let data = std::env::temp_dir().join(format!("learn-predict-test-{}", std::process::id()));
+        let flat = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut count = 0;
+        for l in list(&dir) {
+            for block in l.body.split("```predict\n").skip(1) {
+                let block = block.split("\n```").next().unwrap();
+                let (code, meta) = block.split_once("\n---\n").unwrap_or_else(|| panic!("{}: predict needs a --- line", l.slug));
+                let field = |k: &str| meta.lines().find_map(|line| line.strip_prefix(k).and_then(|r| r.strip_prefix(':'))).unwrap_or("").trim().to_string();
+                let answer = field("answer");
+                assert!(field("options").split('|').any(|o| o.trim() == answer), "{}: the answer must be one of the options", l.slug);
+                let r = crate::runner::run_snippet(code, &data).unwrap();
+                let out = r.get("output").and_then(Json::as_str).unwrap_or("").to_string();
+                assert_eq!(flat(&out), flat(&answer), "{}: the quick check claims different output", l.slug);
+                count += 1;
+            }
+        }
+        std::fs::remove_dir_all(&data).ok();
+        assert!(count >= 10, "expected quick checks in the lessons, found {count}");
     }
 
     /// Every ```visual block is well-formed, and its checks match what the compiler really does.

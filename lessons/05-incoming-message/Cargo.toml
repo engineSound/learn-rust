@@ -1,0 +1,4 @@
+[package]
+name = "lesson-05-incoming-message"
+version = "0.1.0"
+edition = "2021"

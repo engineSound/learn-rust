@@ -169,7 +169,7 @@ skips any line that isn't valid JSON, such as a half-written last line after
 a crash.
 
 ```json
-{"ts":"2026-10-12T09:30:00.000Z","track":"rust","lesson_id":"rust-01-bindings-expressions","concept":null,"kind":"fail","duration_ms":352,"payload":{"passed":0,"failed":0,"total":0,"failing":[],"errors":["E0308"],"timed_out":false,"code":"..."}}
+{"ts":"2026-10-12T09:30:00.000Z","track":"rust","lesson_id":"rust-01-first-function","concept":null,"kind":"fail","duration_ms":352,"payload":{"passed":0,"failed":0,"total":0,"failing":[],"errors":["E0308"],"timed_out":false,"code":"..."}}
 ```
 
 | Field | Meaning |
