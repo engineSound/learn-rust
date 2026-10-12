@@ -42,6 +42,8 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .lesson th, .lesson td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
 .chip { font-size: 12px; font-family: var(--mono); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
+.chip.status { color: var(--ink); border-color: var(--muted); }
+.chip.status.done { color: var(--pass); border-color: var(--pass); }
 
 .work { display: flex; flex-direction: column; min-height: 0; }
 .file-tab { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }

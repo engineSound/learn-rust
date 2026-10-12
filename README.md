@@ -12,7 +12,8 @@ so they can merge into one multi-language tutor later.
 - [x] Lesson format, history format, roadmap
 - [x] Lesson 01
 - [x] Web app (M1): lesson list, editor, Run button → compiler errors and test results in about a second
-- [ ] History database + learner profile
+- [x] Learning history (M2): every run recorded; each lesson shows runs, best score and when you solved it
+- [ ] Learner profile and review schedule
 - [ ] Tutor (Claude API) reading the profile
 - [ ] Docker setup; deploy to AWS
 

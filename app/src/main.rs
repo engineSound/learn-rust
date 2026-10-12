@@ -1,6 +1,7 @@
 //! learn-rust web app. Standard library only: no dependencies to download.
 //! Start with `cargo run`, then open http://localhost:3001.
 
+mod history;
 mod json;
 mod lessons;
 mod runner;
@@ -17,8 +18,11 @@ const MAX_BODY: usize = 256 * 1024;
 struct Paths {
     lessons: PathBuf,
     data: PathBuf,
+    events: PathBuf,
     public: PathBuf,
 }
+
+const TRACK: &str = "rust";
 
 struct Request {
     method: String,
@@ -47,6 +51,7 @@ fn main() {
     let paths: &'static Paths = Box::leak(Box::new(Paths {
         lessons: root.join("lessons"),
         data: root.join("data"),
+        events: std::env::var_os("LEARN_EVENTS").map(PathBuf::from).unwrap_or_else(|| root.join("data").join("events.jsonl")),
         public: root.join("app").join("public"),
     }));
     let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".into());
@@ -140,6 +145,7 @@ fn handle(req: &Request, paths: &Paths) -> Response {
         );
     }
     if method == "GET" && path == "/api/lessons" {
+        let events = history::read_events(&paths.events);
         let list = lessons::list(&paths.lessons)
             .into_iter()
             .map(|l| {
@@ -149,6 +155,7 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                     ("title", l.get("title").cloned().unwrap_or_else(|| Json::str(l.slug.clone()))),
                     ("minutes", l.get("minutes").cloned().unwrap_or(Json::Null)),
                     ("concepts", l.get("concepts").cloned().unwrap_or(Json::Arr(vec![]))),
+                    ("stats", history::lesson_stats(&events, l.get("id"))),
                 ])
             })
             .collect();
@@ -165,9 +172,17 @@ fn handle(req: &Request, paths: &Paths) -> Response {
             Ok(None) => return Response::error(404, "No such lesson"),
             Err(e) => return Response::error(500, &e),
         };
+        let id = lesson.get("id").cloned();
+        let log = |kind: &str, duration: Option<f64>, payload: Json| {
+            if let Err(e) = history::append_event(&paths.events, TRACK, id.as_ref(), kind, duration, payload) {
+                eprintln!("couldn't record history: {e}");
+            }
+        };
+        let stats = || history::lesson_stats(&history::read_events(&paths.events), id.as_ref());
         let result: std::io::Result<Response> = match (method, action) {
             ("GET", "") => {
                 let saved = fs::read_to_string(work_path(paths, &lesson)).ok();
+                log("lesson_open", None, Json::Null);
                 Ok(Response::json(
                     200,
                     Json::obj(vec![
@@ -177,17 +192,28 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                         ("file", Json::str(lesson.file.clone())),
                         ("saved", Json::Bool(saved.is_some())),
                         ("code", Json::Str(saved.unwrap_or_else(|| lesson.starter.clone()))),
+                        ("stats", stats()),
                     ]),
                 ))
             }
             ("PUT", "code") => save_code(paths, &lesson, &req.body).map(|_| Response::json(200, Json::obj(vec![("saved", Json::Bool(true))]))),
             ("DELETE", "code") => {
                 fs::remove_file(work_path(paths, &lesson)).ok();
+                log("reset", None, Json::Null);
                 Ok(Response::json(200, Json::obj(vec![("code", Json::str(lesson.starter.clone()))])))
             }
             ("POST", "run") => save_code(paths, &lesson, &req.body)
                 .and_then(|_| runner::run_lesson(&lesson, &req.body, &paths.data))
-                .map(|r| Response::json(200, r)),
+                .map(|result| {
+                    let kind = if history::is_pass(&result) { "pass" } else { "fail" };
+                    let duration = result.get("durationMs").and_then(Json::as_f64);
+                    log(kind, duration, history::run_payload(&result, &req.body));
+                    let mut result = result;
+                    if let Json::Obj(fields) = &mut result {
+                        fields.push(("stats".to_string(), stats()));
+                    }
+                    Response::json(200, result)
+                }),
             _ => Ok(Response::error(405, "Method not allowed")),
         };
         return result.unwrap_or_else(|e| Response::error(500, &e.to_string()));

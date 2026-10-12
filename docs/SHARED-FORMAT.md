@@ -55,27 +55,51 @@ The learner's code is saved to `data/work/<slug>/<edit file>` (gitignored).
 
 ## 3. History format
 
-One append-only event log, stored in SQLite (`data/history.db`):
+One append-only event log in [JSON Lines](https://jsonlines.org):
+`data/events.jsonl`, one event per line, oldest first. It is plain text (you
+can read it in any editor) and needs no database or dependencies. The app
+skips any line that isn't valid JSON, such as a half-written last line after
+a crash.
 
-```sql
-CREATE TABLE events (
-  id          INTEGER PRIMARY KEY,
-  ts          TEXT    NOT NULL,          -- ISO 8601, UTC
-  track       TEXT    NOT NULL,          -- nodejs | rust
-  lesson_id   TEXT,                      -- from lesson front matter
-  concept     TEXT,                      -- optional: a single concept
-  kind        TEXT    NOT NULL,          -- see below
-  duration_ms INTEGER,
-  payload     TEXT                       -- JSON: code, error text, question...
-);
+```json
+{"ts":"2026-10-12T09:30:00.000Z","track":"rust","lesson_id":"rust-01-bindings-expressions","concept":null,"kind":"fail","duration_ms":352,"payload":{"passed":0,"failed":0,"total":0,"failing":[],"errors":["E0308"],"timed_out":false,"code":"..."}}
 ```
 
-`kind` is one of: `session_start`, `session_end`, `lesson_open`, `run`,
-`pass`, `fail`, `hint`, `question`, `review`.
+| Field | Meaning |
+|-------|---------|
+| `ts` | ISO 8601, UTC, with milliseconds |
+| `track` | `nodejs`, `rust`, … |
+| `lesson_id` | from lesson front matter, or `null` |
+| `concept` | a single concept, or `null` |
+| `kind` | see below |
+| `duration_ms` | how long the run took, or `null` |
+| `payload` | kind-specific object, or `null` |
 
-Everything else (mastery, review schedule, the learner profile) is
-**derived** from events and can be rebuilt at any time. Merging the two apps
-later means concatenating two event tables.
+Kinds recorded today:
+
+| `kind` | When | `payload` |
+|--------|------|-----------|
+| `lesson_open` | a lesson is opened | `null` |
+| `pass` | a run where every test passes | run payload |
+| `fail` | any other run (failures, compile errors, timeout) | run payload |
+| `reset` | code reset to the starter | `null` |
+
+Run payload: `{ passed, failed, total, failing: [test names],
+errors: [compiler error codes or titles], timed_out, code }`. `code` is
+what was run, capped at 64 KB.
+
+Reserved for later milestones: `hint`, `question` (tutor, M4) and `review`
+(spaced repetition, M3). Sessions aren't recorded as events; a session is
+derived as a run of events with no gap longer than 30 minutes.
+
+Everything else (per-lesson stats, mastery, the review schedule, the learner
+profile) is **derived** from events and can be rebuilt at any time. Merging
+the two apps later means concatenating the two files and sorting by `ts`.
+
+The API returns per-lesson `stats` derived from events:
+`{ runs, first_pass_run, last_result, last_ts, best_passed, total }`, where
+`total` is the largest test count seen (a run that doesn't compile reports 0
+tests).
 
 ## 4. Learner profile
 
