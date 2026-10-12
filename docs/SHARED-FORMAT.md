@@ -302,6 +302,12 @@ request is retried on Anthropic's recommended fallback model. Node uses the
 official SDK (`@anthropic-ai/sdk`); Rust has no official SDK and calls the
 Messages API over raw HTTP through the system `curl`, passing the key in a
 private temporary config file, never on the command line.
+Values in `.env` win over the shell's (an old exported `ANTHROPIC_API_KEY`
+must not shadow it), and only the API key is sent. A rejected key (401) is
+explained without revealing it: where it came from (`.env` or the shell), its
+first 12 and last 4 characters, the API's message, and the usual mix-ups (a
+Claude subscription token instead of an API key, a non-default
+`ANTHROPIC_BASE_URL`).
 
 The prompts are shared files in `docs/tutor/` (identical in both repos):
 `system.md` (persona; includes the learner's own "## Learner" section of

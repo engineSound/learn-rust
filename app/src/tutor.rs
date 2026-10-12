@@ -48,7 +48,11 @@ pub fn status() -> Json {
     Json::obj(vec![("enabled", Json::Bool(reason.is_none())), ("reason", reason.map(Json::str).unwrap_or(Json::Null))])
 }
 
-/// Load KEY=VALUE lines from .env into the environment (existing variables win).
+/// Names set from .env (for explaining a rejected key).
+static FROM_ENV_FILE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Load KEY=VALUE lines from .env into the environment. Its values win over the shell's,
+/// so an old exported key can't shadow it.
 pub fn load_env_file(path: &Path) {
     let Ok(text) = fs::read_to_string(path) else { return };
     for line in text.lines() {
@@ -57,12 +61,47 @@ pub fn load_env_file(path: &Path) {
             continue;
         }
         if let Some((k, v)) = line.split_once('=') {
-            let (k, v) = (k.trim(), v.trim().trim_matches('"').trim_matches('\''));
-            if !k.is_empty() && !v.is_empty() && std::env::var_os(k).is_none() {
+            let (k, v) = (k.trim().trim_start_matches("export ").trim(), v.trim().trim_matches('"').trim_matches('\'').trim());
+            if !k.is_empty() && !v.is_empty() {
                 std::env::set_var(k, v);
+                FROM_ENV_FILE.lock().unwrap_or_else(|e| e.into_inner()).push(k.to_string());
             }
         }
     }
+}
+
+/// Why a key was rejected, without revealing it: where it came from, its prefix and last 4
+/// characters (as console.anthropic.com shows them), and the usual mix-ups. Same wording in learn-nodejs.
+pub fn key_problem(api_message: &str) -> String {
+    let Some(key) = api_key() else { return "No API key is set. Put ANTHROPIC_API_KEY in .env, then restart.".into() };
+    let from_file = |name: &str| FROM_ENV_FILE.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|k| k == name);
+    let where_ = if from_file("ANTHROPIC_API_KEY") { ".env" } else { "your shell environment (not .env)" };
+    let chars: Vec<char> = key.chars().collect();
+    let head: String = chars.iter().take(12).collect();
+    let tail: String = chars[chars.len().saturating_sub(4)..].iter().collect();
+    let quoted = if api_message.is_empty() { String::new() } else { format!(" (\"{api_message}\")") };
+    let mut lines = vec![
+        format!("The API key was rejected{quoted}."),
+        format!("The app used the key from {where_}: {head}…{tail} ({} characters).", chars.len()),
+    ];
+    if !from_file("ANTHROPIC_API_KEY") {
+        lines.push("Put your key in .env (it wins over the shell), or remove the old `export ANTHROPIC_API_KEY` from your shell profile.".into());
+    }
+    if key.starts_with("sk-ant-oat") {
+        lines.push("This is a Claude subscription login token, not an API key. Create an API key at console.anthropic.com → API keys.".into());
+    } else if !key.starts_with("sk-ant-api") {
+        lines.push("That doesn't look like an Anthropic API key (they start with sk-ant-api). Check for a stray character or a different value.".into());
+    }
+    if let Ok(base) = std::env::var("ANTHROPIC_BASE_URL") {
+        if base.trim_end_matches('/') != "https://api.anthropic.com" {
+            let src = if from_file("ANTHROPIC_BASE_URL") { " in .env" } else { " in your shell" };
+            lines.push(format!("Requests go to {base} (ANTHROPIC_BASE_URL{src}), not api.anthropic.com: remove it."));
+        }
+    }
+    if lines.len() == 2 {
+        lines.push("If those characters match a key at console.anthropic.com → API keys, check that it is active; otherwise paste the key into .env again, then restart.".into());
+    }
+    lines.join(" ")
 }
 
 /// POST /v1/messages with curl. The key goes in a private temporary config file, never on the command line.
@@ -115,7 +154,7 @@ fn post_messages(body: &Json) -> Result<Json, TutorError> {
     if code != 200 {
         let message = parsed.get("error").and_then(|e| e.get("message")).and_then(Json::as_str).unwrap_or("unknown error").to_string();
         return Err(match code {
-            401 => err(401, "The API key was rejected. Check ANTHROPIC_API_KEY in .env."),
+            401 => err(401, key_problem(&message)),
             429 => err(429, "The tutor is rate-limited right now. Try again in a minute."),
             _ => err(502, format!("The Claude API returned an error ({code}): {message}")),
         });
@@ -992,5 +1031,35 @@ mod tests {
         let (text, first) = split_visuals("# A\n\n```visual\n{\"x\":1}\n```\n\nmore\n```visual\n{\"y\":2}\n```\nend");
         assert_eq!(text, "# A\n\n\n\nmore\n\nend");
         assert_eq!(first.as_deref(), Some("{\"x\":1}"));
+    }
+
+    #[test]
+    fn env_file_wins_and_a_rejected_key_is_explained_without_revealing_it() {
+        let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = (std::env::var("ANTHROPIC_API_KEY").ok(), std::env::var("ANTHROPIC_BASE_URL").ok());
+        std::env::remove_var("ANTHROPIC_BASE_URL");
+        std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-oat01-old-shell-token-xyz");
+        let shell = key_problem("invalid x-api-key");
+        assert!(shell.contains("your shell environment (not .env)") && shell.contains("subscription login token"), "{shell}");
+
+        let dir = temp("env");
+        let real = format!("sk-ant-api03-{}Wxyz", "A".repeat(80));
+        fs::write(dir.join(".env"), format!("# my key\nANTHROPIC_API_KEY=\"{real}\"\n")).unwrap();
+        load_env_file(&dir.join(".env"));
+        assert_eq!(std::env::var("ANTHROPIC_API_KEY").unwrap(), real);
+        let msg = key_problem("invalid x-api-key");
+        assert!(msg.contains("rejected (\"invalid x-api-key\"). The app used the key from .env: sk-ant-api03…Wxyz (97 characters)."), "{msg}");
+        assert!(!msg.contains(&"A".repeat(10)), "never shows the key");
+        assert!(msg.contains("console.anthropic.com"));
+
+        std::env::set_var("ANTHROPIC_BASE_URL", "http://localhost:9999");
+        assert!(key_problem("").contains("Requests go to http://localhost:9999 (ANTHROPIC_BASE_URL in your shell)"));
+        for (k, v) in [("ANTHROPIC_API_KEY", saved.0), ("ANTHROPIC_BASE_URL", saved.1)] {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        fs::remove_dir_all(&dir).ok();
     }
 }
