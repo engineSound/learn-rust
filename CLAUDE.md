@@ -19,8 +19,9 @@ learning, style, progress and reviews.** Nothing is one-size-fits-all:
   respect that signal together with runs-to-solve and recurring mistakes.
 - When adding content, add drills and stretches for each core lesson, not just
   the next core lesson. The in-app tutor also generates targeted drills
-  (`lessons/NNg-*`, `generated: true`); its prompts are in `docs/tutor/`,
-  shared with the other repo.
+  (`lessons/NNg-*`, `generated: true`) and step-through visuals of the
+  learner's own failing code, checked by running the traced call on their real
+  code; its prompts are in `docs/tutor/`, shared with the other repo.
 
 Lesson design (from the learner's feedback: lessons must teach, not just test):
 - Learn first, then do: every exercise has *Learn the idea* (with a runnable

@@ -142,6 +142,7 @@ Both apps serve the same JSON API, and `app/public/` (the browser UI) is
 | `POST /api/snippet` | JSON `{ code }` | `{ output, ok, errors, timedOut }`: runs a ```run / ```predict block |
 | `POST /api/lessons/:slug/log` | JSON `{ kind: "hint" \| "predict", payload }` | `{ ok }`: records a hint shown or a quick-check answer |
 | `POST /api/lessons/:slug/hint` | JSON `{ code, question }` | `{ hint }` (Markdown; section 6) |
+| `POST /api/lessons/:slug/visualize` | JSON `{ code }` | `{ visual, verified: { call, prints }, attempts }`: a checked step-through of the learner's failing code (section 6) |
 | `POST /api/lessons/:slug/drill` | | `{ slug, id, title, targets, attempts, stats, next }`: a new verified drill (section 6) |
 
 Tutor errors come back as `{ error }` with status 401 (key rejected), 429
@@ -196,7 +197,7 @@ Run payload: `{ passed, failed, total, failing: [test names],
 errors: [compiler error codes or titles], timed_out, code }`. `code` is
 what was run, capped at 64 KB.
 
-| `hint` | a hint was shown | `{ source: "lesson" \| "tutor", level?: number, question: string \| null }` |
+| `hint` | a hint was shown | `{ source: "lesson" \| "tutor" \| "visual", level?: number, question: string \| null }` |
 | `predict` | a quick-check answer | `{ question: number, correct: boolean }` |
 | `generated` | the tutor wrote a new drill (`lesson_id` is the new drill) | `{ for, targets, attempts }` |
 
@@ -304,12 +305,32 @@ private temporary config file, never on the command line.
 
 The prompts are shared files in `docs/tutor/` (identical in both repos):
 `system.md` (persona; includes the learner's own "## Learner" section of
-`PROGRESS.md` and the generated profile), `hint.md`, `drill.md`,
-`conventions-<track>.md` and `drill-schema.json`.
+`PROGRESS.md` and the generated profile), `hint.md`, `visual.md`,
+`visual-schema.json`, `drill.md`, `conventions-<track>.md` and
+`drill-schema.json`.
 
 **Hint** (effort `medium`). The app runs the tests on the learner's current
 code first, then asks for the smallest hint that unblocks them, under 120
 words, never the solution; compiler error codes are explained first.
+
+**Show me what my code does** (effort `medium`, structured output with
+`visual-schema.json`). After a failing run, the app runs the tests, then asks
+for a step-through visual (section 1 format) of the learner's own code on the
+first failing test, ending where it goes wrong, without the fix. Every field
+in the schema is required, so "" and line 0 mean "not set"; the app turns the
+answer into a normal visual with one scenario in the group *Your code*.
+Before the learner sees it, the app checks it:
+
+1. the visualizer can play it (the same checks as lesson visuals: regions,
+   boxes, arrows and lines all refer to things that exist);
+2. its claim is true on the real code: `check.call` is run after the
+   learner's code (Node: `console.log(<call>)`; Rust: `println!("{:?}", <call>)`)
+   and must print `check.prints`; if the code doesn't load or compile,
+   `call` is "" and the real error must contain `check.prints`.
+
+A visual that fails a check is sent back once with the reason (for a wrong
+claim, with what really printed); a second failure is reported to the
+learner. A shown visual is logged as a `hint` with `source: "visual"`.
 
 **New drill** (effort `high`, structured output with `drill-schema.json`).
 Aimed at the exercise's core lesson, using what the profile says: runs and

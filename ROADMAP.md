@@ -73,5 +73,5 @@ A **vocabulary API with spaced repetition**, the same project as the
 | M2 ✅ | Every run, pass and fail saved to the history log (`data/events.jsonl`) |
 | M3 ✅ | Learner profile generated after each session; review items scheduled |
 | M3.5 ✅ | Adaptive path: reviews with fresh drills, extra drills after a struggle, stretches after an easy win, your own difficulty ratings |
-| M4 ✅ | **Tutor (Claude API)**: compiler-error explanations and hints in your style; generates new drills aimed at your recurring mistakes, verified against a reference solution before you see them |
+| M4 ✅ | **Tutor (Claude API)**: compiler-error explanations and hints in your style; a step-through visual of your own failing code, checked against what it really does; generates new drills aimed at your recurring mistakes, verified against a reference solution before you see them |
 | M5 | Docker; deploy to an existing EC2 instance behind a login |

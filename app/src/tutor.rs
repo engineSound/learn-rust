@@ -1,4 +1,4 @@
-//! The tutor: hints and newly generated drills from Claude, adapted to the learner's profile.
+//! The tutor: hints, step-through visuals of the learner's own code and newly generated drills from Claude, adapted to the learner's profile.
 //! Prompts live in docs/tutor/ (shared with learn-nodejs). Rules: docs/SHARED-FORMAT.md, section 6.
 //!
 //! Rust has no official Anthropic SDK, so this calls the Messages API over raw HTTP through
@@ -248,6 +248,186 @@ pub fn hint(ctx: &Context, title: &str, lesson: &str, file: &str, code: &str, re
         &[("title", title), ("lesson", lesson), ("file", file), ("code", code), ("result", &describe_result(result)), ("question", question)],
     );
     Ok(ask(&system_prompt(ctx)?, &[user_message(user)], "medium", None)?.trim().to_string())
+}
+
+// ---------- "Show me what my code does": a visual of the learner's own failing run ----------
+
+/// The lesson text without its ```visual blocks (they are long), and the first one as a style example.
+pub fn split_visuals(body: &str) -> (String, Option<String>) {
+    let mut text = String::new();
+    let mut first = None;
+    let mut rest = body;
+    while let Some(start) = rest.find("```visual\n") {
+        text.push_str(&rest[..start]);
+        let after = &rest[start + "```visual\n".len()..];
+        let end = after.find("\n```").unwrap_or(after.len());
+        if first.is_none() {
+            first = Some(after[..end].to_string());
+        }
+        rest = after.get(end + "\n```".len()..).unwrap_or("");
+    }
+    text.push_str(rest);
+    (text, first)
+}
+
+/// The first scenario of a lesson visual, without its check, as a compact style example.
+fn example_of(visual: &str) -> String {
+    let Ok(spec) = json::parse(visual) else { return "(none)".into() };
+    let first: Vec<Json> = spec.get("scenarios").map(Json::as_array).unwrap_or(&[]).iter().take(1).map(|sc| without(sc, &["check"])).collect();
+    Json::obj(vec![
+        ("title", spec.get("title").cloned().unwrap_or(Json::Null)),
+        ("regions", spec.get("regions").cloned().unwrap_or(Json::Arr(vec![]))),
+        ("scenarios", Json::Arr(first)),
+    ])
+    .to_string()
+}
+
+fn without(j: &Json, keys: &[&str]) -> Json {
+    match j {
+        Json::Obj(fields) => Json::Obj(fields.iter().filter(|(k, _)| !keys.contains(&k.as_str())).cloned().collect()),
+        other => other.clone(),
+    }
+}
+
+/// An object without its "" fields ("" means "not set" in visual-schema.json).
+fn keep(j: &Json) -> Json {
+    match j {
+        Json::Obj(fields) => Json::Obj(fields.iter().filter(|(_, v)| v.as_str() != Some("")).cloned().collect()),
+        other => other.clone(),
+    }
+}
+
+/// Schema answer → the visual spec visual.js plays ("" and line 0 mean "not set").
+pub fn to_visual(reply: &Json) -> Json {
+    let arr = |j: Option<&Json>| j.map(Json::as_array).unwrap_or(&[]).to_vec();
+    let sc = reply.get("scenario").cloned().unwrap_or(Json::Obj(vec![]));
+    let steps: Vec<Json> = arr(sc.get("steps"))
+        .iter()
+        .map(|s| {
+            let line = s.get("line").and_then(Json::as_f64).filter(|n| *n > 0.0).map(Json::Num).unwrap_or(Json::str(""));
+            keep(&Json::obj(vec![
+                ("line", line),
+                ("say", s.get("say").cloned().unwrap_or(Json::str(""))),
+                ("rule", s.get("rule").cloned().unwrap_or(Json::str(""))),
+                ("error", s.get("error").cloned().unwrap_or(Json::str(""))),
+                ("set", Json::Arr(arr(s.get("set")).iter().map(keep).collect())),
+                ("drop", Json::Arr(arr(s.get("drop")))),
+                ("arrows", Json::Arr(arr(s.get("arrows")).iter().map(keep).collect())),
+            ]))
+        })
+        .collect();
+    let name = sc.get("name").and_then(Json::as_str).filter(|n| !n.is_empty()).unwrap_or("Your code");
+    Json::obj(vec![
+        ("title", reply.get("title").cloned().unwrap_or(Json::str(""))),
+        ("intro", reply.get("intro").cloned().unwrap_or(Json::str(""))),
+        ("regions", Json::Arr(arr(reply.get("regions")).iter().map(keep).collect())),
+        (
+            "scenarios",
+            Json::Arr(vec![Json::obj(vec![
+                ("name", Json::str(name)),
+                ("group", Json::str("Your code")),
+                ("code", sc.get("code").cloned().unwrap_or(Json::str(""))),
+                ("steps", Json::Arr(steps)),
+            ])]),
+        ),
+    ])
+}
+
+fn flat(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Run the claimed call on the learner's real code: None when the claim holds, else what really happened.
+fn check_claim(ctx: &Context, code: &str, call: &str, prints: &str) -> Result<Option<String>, TutorError> {
+    let prints = flat(prints);
+    if prints.is_empty() {
+        return Ok(Some("check.prints is empty.".into()));
+    }
+    let main = if call.is_empty() { "fn main() {}".to_string() } else { format!("fn main() {{\n    println!(\"{{:?}}\", {call});\n}}") };
+    let r = runner::run_snippet(&format!("{}\n\n{main}\n", code.trim_end()), &ctx.data_dir).map_err(|e| err(500, e.to_string()))?;
+    let ok = r.get("ok").and_then(Json::as_bool) == Some(true);
+    let out = flat(r.get("output").and_then(Json::as_str).unwrap_or(""));
+    if r.get("timedOut").and_then(Json::as_bool) == Some(true) {
+        return Ok(Some(format!("Running `{call}` on their code timed out.")));
+    }
+    if ok && call.is_empty() {
+        return Ok(Some("Their code compiles, so check.call must make the call the failing test makes.".into()));
+    }
+    let holds = if ok { out == prints || out.ends_with(&format!(" {prints}")) } else { prints.len() >= 3 && r.to_string().contains(&prints) };
+    if holds {
+        return Ok(None);
+    }
+    let what = if call.is_empty() { "their code".to_string() } else { format!("`println!(\"{{:?}}\", {call})`") };
+    let really: String = if out.is_empty() { describe_errors(&r) } else { out.chars().take(1500).collect() };
+    Ok(Some(format!("Running {what} really gave:\n\n{really}\n\nbut check.prints says \"{prints}\". Trace their code again: the visual must show what really happens.")))
+}
+
+fn describe_errors(r: &Json) -> String {
+    let errors: Vec<String> = r
+        .get("errors")
+        .map(Json::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .map(|e| format!("{} {}", e.get("code").and_then(Json::as_str).unwrap_or(""), e.get("title").and_then(Json::as_str).unwrap_or("")).trim().to_string())
+        .collect();
+    if errors.is_empty() { "(no output)".into() } else { errors.join("\n") }
+}
+
+pub struct Trace {
+    pub visual: Json,
+    pub call: String,
+    pub prints: String,
+    pub attempts: usize,
+}
+
+/// Ask Claude for a step-through visual of the learner's code on the first failing test, then
+/// check it: its structure (as visual.js will play it) and its claim (run on the real code).
+pub fn visualize_run(ctx: &Context, title: &str, lesson: &str, file: &str, code: &str, result: Option<&Json>) -> Result<Trace, TutorError> {
+    let (text, example) = split_visuals(lesson);
+    let example = example.map(|e| example_of(&e)).unwrap_or_else(|| "(this lesson has none)".into());
+    let user = render(
+        &read_prompt(ctx, "visual.md")?,
+        &[
+            ("title", title),
+            ("lesson", text.trim()),
+            ("file", file),
+            ("code", code),
+            ("result", &describe_result(result)),
+            ("example", &example),
+            ("call_rule", "a Rust expression that calls their code the way the failing test does (the app adds `fn main() { println!(\"{:?}\", <call>); }` after their code)"),
+            ("compile_word", "compile"),
+        ],
+    );
+    let schema = json::parse(&read_prompt(ctx, "visual-schema.json")?).map_err(|e| err(500, format!("bad visual-schema.json: {e}")))?;
+    let system = system_prompt(ctx)?;
+    let mut messages = vec![user_message(user)];
+    let mut problem = String::new();
+    for attempt in 1..=ATTEMPTS {
+        let reply = ask(&system, &messages, "medium", Some(&schema))?;
+        match json::parse(&reply) {
+            Err(_) => problem = "The reply was not valid JSON.".into(),
+            Ok(parsed) => {
+                let visual = to_visual(&parsed);
+                let shape = crate::lessons::visual_problems(&visual);
+                let check = parsed.get("check");
+                let field = |k: &str| check.and_then(|c| c.get(k)).and_then(Json::as_str).unwrap_or("").trim().to_string();
+                let (call, prints) = (field("call"), field("prints"));
+                let found = if shape.is_empty() {
+                    check_claim(ctx, code, &call, &prints)?
+                } else {
+                    Some(format!("The visualizer cannot play it:\n- {}", shape.iter().take(8).cloned().collect::<Vec<_>>().join("\n- ")))
+                };
+                match found {
+                    None => return Ok(Trace { visual, call, prints, attempts: attempt }),
+                    Some(p) => problem = p,
+                }
+            }
+        }
+        messages.push(Json::obj(vec![("role", Json::str("assistant")), ("content", Json::Str(reply))]));
+        messages.push(user_message(format!("The app checked this visual and it failed:\n\n{problem}\n\nReturn a corrected visual in the same format.")));
+    }
+    let first_line = problem.lines().next().unwrap_or("").to_string();
+    Err(err(502, format!("The tutor couldn't trace your code reliably ({first_line}). Try again, or ask a question instead.")))
 }
 
 // ---------- generated drills ----------
@@ -702,5 +882,115 @@ mod tests {
         assert_eq!(sent.get("model"), Some(&Json::str(MODEL)));
         assert!(sent.get("messages").unwrap().as_array()[0].get("content").and_then(Json::as_str).unwrap().contains("why?"));
         assert!(fs::read_dir(std::env::temp_dir()).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().ends_with(".curl")), "curl config with the key was left behind");
+    }
+
+    /// A reply in visual-schema.json's shape: every field present, "" and 0 meaning "not set".
+    fn trace_reply(call: &str, prints: &str, arrow_to: &str, line: f64) -> String {
+        let s = |v: &str| Json::str(v);
+        let bx = |id: &str, inn: &str, title: &str, value: &str, state: &str| {
+            Json::obj(vec![("id", s(id)), ("in", s(inn)), ("title", s(title)), ("value", s(value)), ("tag", s("")), ("sub", s("")), ("state", s(state))])
+        };
+        let step = |line: f64, say: &str, rule: &str, error: &str, set: Vec<Json>, arrows: Vec<Json>| {
+            Json::obj(vec![("line", Json::Num(line)), ("say", s(say)), ("rule", s(rule)), ("error", s(error)), ("set", Json::Arr(set)), ("drop", Json::Arr(vec![])), ("arrows", Json::Arr(arrows))])
+        };
+        let arrow = Json::obj(vec![("from", s("n")), ("to", s(arrow_to)), ("label", s("format!")), ("state", s("bad")), ("style", s(""))]);
+        Json::obj(vec![
+            ("title", s("What your greeting() does with \"Sam\"")),
+            ("intro", s("Watch the text being built.")),
+            (
+                "regions",
+                Json::Arr(vec![
+                    Json::obj(vec![("id", s("fn")), ("label", s("Inside greeting(name)")), ("kind", s(""))]),
+                    Json::obj(vec![("id", s("out")), ("label", s("Console")), ("kind", s("output"))]),
+                ]),
+            ),
+            (
+                "scenario",
+                Json::obj(vec![
+                    ("name", s("Your code with \"Sam\"")),
+                    ("code", s("pub fn greeting(name: &str) -> String {\n    format!(\"Hello {name}\")\n}\nprintln!(\"{}\", greeting(\"Sam\"));")),
+                    (
+                        "steps",
+                        Json::Arr(vec![
+                            step(4.0, "The test calls greeting(\"Sam\").", "", "", vec![bx("n", "fn", "name", "\"Sam\"", "active")], vec![]),
+                            step(line, "format! builds \"Hello Sam\": no comma, no \"!\".", "", "", vec![bx("r", "fn", "result", "\"Hello Sam\"", "bad")], vec![arrow]),
+                            step(0.0, "The test wanted \"Hello, Sam!\".", "Put the comma and ! inside the format string.", "Expected \"Hello, Sam!\", got \"Hello Sam\"", vec![bx("o", "out", "", "Hello Sam", "")], vec![]),
+                        ]),
+                    ),
+                ]),
+            ),
+            ("check", Json::obj(vec![("call", s(call)), ("prints", s(prints))])),
+        ])
+        .to_string()
+    }
+
+    const ALMOST: &str = "pub fn greeting(name: &str) -> String {\n    format!(\"Hello {name}\")\n}\n";
+
+    #[test]
+    fn visualize_checks_the_trace_on_the_real_code_and_sends_a_wrong_claim_back_once() {
+        let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = temp("trace");
+        let lesson = crate::lessons::load(&root().join("lessons"), "01-first-function").unwrap().unwrap();
+        let code = lesson.starter.replacen("    todo!()", "    format!(\"Hello {name}\")", 1);
+        let result = runner::run_lesson(&lesson, &code, &dir.join("data")).unwrap();
+        let seen = fake(vec![reply(&trace_reply("greeting(\"Sam\")", "\"Hello, Sam!\"", "r", 2.0)), reply(&trace_reply("greeting(\"Sam\")", "\"Hello Sam\"", "r", 2.0))]);
+        let made = visualize_run(&context(&dir), "Your first Rust function", &lesson.body, &lesson.file, &code, Some(&result));
+        set_transport_for_tests(None);
+        let made = made.unwrap_or_else(|e| panic!("{}", e.message));
+        assert_eq!(made.attempts, 2);
+        assert_eq!((made.call.as_str(), made.prints.as_str()), ("greeting(\"Sam\")", "\"Hello Sam\""));
+        let sc = &made.visual.get("scenarios").unwrap().as_array()[0];
+        assert_eq!(sc.get("group"), Some(&Json::str("Your code")));
+        let steps = sc.get("steps").unwrap().as_array();
+        assert_eq!(steps[2].get("line"), None, "line 0 means no line");
+        assert_eq!(steps[0].get("rule"), None, "empty strings are dropped");
+        assert_eq!(steps[0].get("set").unwrap().as_array()[0].to_string(), r#"{"id":"n","in":"fn","title":"name","value":"\"Sam\"","state":"active"}"#);
+        assert_eq!(made.visual.get("regions").unwrap().as_array()[0].get("kind"), None);
+
+        let requests = seen.lock().unwrap().clone();
+        let oc = requests[0].get("output_config").unwrap();
+        assert_eq!(oc.get("effort"), Some(&Json::str("medium")));
+        assert!(oc.get("format").and_then(|f| f.get("schema")).and_then(|s| s.get("properties")).and_then(|p| p.get("check")).is_some());
+        let prompt = requests[0].get("messages").unwrap().as_array()[0].get("content").and_then(Json::as_str).unwrap().to_string();
+        assert!(prompt.contains("format!(\"Hello {name}\")") && prompt.contains("FAILED"), "sends their code and the failing tests");
+        assert!(!prompt.contains("```visual"), "the lesson text is sent without its visual blocks");
+        let msgs = requests[1].get("messages").unwrap().as_array();
+        let sent_back = msgs[msgs.len() - 1].get("content").and_then(Json::as_str).unwrap();
+        assert!(sent_back.contains("really gave") && sent_back.contains("Hello Sam"), "{sent_back}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn visualize_never_returns_a_visual_the_player_cannot_show() {
+        let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = temp("trace-bad");
+        let seen = fake(vec![reply(&trace_reply("greeting(\"Sam\")", "\"Hello Sam\"", "nowhere", 2.0)), reply(&trace_reply("greeting(\"Sam\")", "\"Hello Sam\"", "r", 9.0))]);
+        let r = visualize_run(&context(&dir), "T", "# L", "src/lib.rs", ALMOST, None);
+        set_transport_for_tests(None);
+        assert!(r.err().unwrap().message.contains("couldn't trace"));
+        let requests = seen.lock().unwrap().clone();
+        let msgs = requests[1].get("messages").unwrap().as_array();
+        assert!(msgs[msgs.len() - 1].get("content").and_then(Json::as_str).unwrap().contains("arrow n → nowhere points at a missing box"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn visualize_traces_code_that_does_not_compile_to_its_real_error() {
+        let _s = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = temp("trace-e0308");
+        fake(vec![reply(&trace_reply("", "E0308", "r", 2.0))]);
+        let code = ALMOST.replace("\")\n", "\");\n");
+        let r = visualize_run(&context(&dir), "T", "# L", "src/lib.rs", &code, None);
+        set_transport_for_tests(None);
+        let made = r.unwrap_or_else(|e| panic!("{}", e.message));
+        assert_eq!((made.call.as_str(), made.prints.as_str()), ("", "E0308"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn split_visuals_keeps_the_text_and_the_first_visual() {
+        let (text, first) = split_visuals("# A\n\n```visual\n{\"x\":1}\n```\n\nmore\n```visual\n{\"y\":2}\n```\nend");
+        assert_eq!(text, "# A\n\n\n\nmore\n\nend");
+        assert_eq!(first.as_deref(), Some("{\"x\":1}"));
     }
 }

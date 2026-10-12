@@ -103,6 +103,83 @@ pub fn load(lessons_dir: &Path, slug: &str) -> Result<Option<Lesson>, String> {
     Ok(Some(Lesson { slug: slug.to_string(), dir, meta, body, file, starter }))
 }
 
+/// Everything that would make a ```visual spec (docs/SHARED-FORMAT.md, section 1) show nonsense,
+/// replayed the way visual.js plays it; empty means it's fine. Used by the lesson tests and to
+/// check visuals the tutor writes before the learner sees them.
+pub fn visual_problems(spec: &Json) -> Vec<String> {
+    let str_of = |j: &Json, k: &str| j.get(k).and_then(Json::as_str).unwrap_or("").to_string();
+    let scenarios = spec.get("scenarios").map(Json::as_array).unwrap_or(&[]);
+    if scenarios.is_empty() {
+        return vec!["a visual needs scenarios".into()];
+    }
+    let top_regions = spec.get("regions").map(Json::as_array).unwrap_or(&[]);
+    let mut problems = Vec::new();
+    for sc in scenarios {
+        let name = str_of(sc, "name");
+        let place = if name.is_empty() { "scenario".to_string() } else { name };
+        let regions: Vec<String> = sc.get("regions").map(Json::as_array).unwrap_or(top_regions).iter().map(|r| str_of(r, "id")).collect();
+        let lines = str_of(sc, "code").split('\n').count() as f64;
+        let steps = sc.get("steps").map(Json::as_array).unwrap_or(&[]);
+        if regions.is_empty() {
+            problems.push(format!("{place}: no regions"));
+        }
+        if steps.len() < 2 {
+            problems.push(format!("{place}: needs at least 2 steps"));
+            continue;
+        }
+        let mut boxes: Vec<(String, String)> = Vec::new(); // (id, region), in order
+        let mut arrows: &[Json] = &[];
+        for (i, step) in steps.iter().enumerate() {
+            let at = format!("{place} step {}", i + 1);
+            for id in step.get("drop").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str) {
+                boxes.retain(|b| b.0 != id);
+            }
+            for set in step.get("set").map(Json::as_array).unwrap_or(&[]) {
+                let id = str_of(set, "id");
+                let region = set.get("in").and_then(Json::as_str).filter(|r| !r.is_empty()).map(String::from);
+                match boxes.iter_mut().find(|b| b.0 == id) {
+                    Some(b) => {
+                        if let Some(r) = region {
+                            b.1 = r;
+                        }
+                    }
+                    None => boxes.push((id, region.unwrap_or_default())),
+                }
+            }
+            for b in &boxes {
+                if b.1.is_empty() {
+                    problems.push(format!("{at}: new box {} needs \"in\"", b.0));
+                } else if !regions.contains(&b.1) {
+                    problems.push(format!("{at}: box {} is in unknown region {}", b.0, b.1));
+                }
+            }
+            if let Some(a) = step.get("arrows") {
+                arrows = a.as_array();
+            }
+            for a in arrows {
+                let (from, to) = (str_of(a, "from"), str_of(a, "to"));
+                if !boxes.iter().any(|b| b.0 == from) || !boxes.iter().any(|b| b.0 == to) {
+                    problems.push(format!("{at}: arrow {from} → {to} points at a missing box"));
+                }
+            }
+            let line_nums: Vec<f64> = match step.get("line") {
+                Some(Json::Arr(items)) => items.iter().filter_map(Json::as_f64).collect(),
+                Some(j) => j.as_f64().into_iter().collect(),
+                None => vec![],
+            };
+            for n in line_nums {
+                if !(n >= 1.0 && n <= lines) {
+                    problems.push(format!("{at}: line {n} is outside the code ({lines} lines)"));
+                }
+            }
+            if str_of(step, "say").is_empty() {
+                problems.push(format!("{at}: needs \"say\""));
+            }
+        }
+    }
+    problems
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,45 +289,11 @@ mod tests {
         for l in list(&dir) {
             for block in l.body.split("```visual\n").skip(1) {
                 let spec = crate::json::parse(block.split("\n```").next().unwrap()).unwrap_or_else(|e| panic!("{}: bad visual JSON: {e}", l.slug));
-                let top_regions = spec.get("regions").map(Json::as_array).unwrap_or(&[]).to_vec();
                 for sc in spec.get("scenarios").map(Json::as_array).unwrap_or(&[]) {
                     let place = format!("{} / {}", l.slug, str_of(sc, "name"));
-                    let regions: Vec<String> = sc.get("regions").map(Json::as_array).unwrap_or(&top_regions).iter().map(|r| str_of(r, "id")).collect();
                     let code = str_of(sc, "code");
-                    let lines = code.lines().count() as f64;
-                    let steps = sc.get("steps").map(Json::as_array).unwrap_or(&[]);
-                    assert!(!regions.is_empty() && steps.len() >= 2, "{place}: needs regions and at least 2 steps");
-                    let mut boxes: Vec<(String, String)> = Vec::new(); // (id, region)
-                    for (i, step) in steps.iter().enumerate() {
-                        for id in step.get("drop").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str) {
-                            boxes.retain(|b| b.0 != id);
-                        }
-                        for set in step.get("set").map(Json::as_array).unwrap_or(&[]) {
-                            let id = str_of(set, "id");
-                            let region = set.get("in").and_then(Json::as_str).map(String::from);
-                            match boxes.iter_mut().find(|b| b.0 == id) {
-                                Some(b) => {
-                                    if let Some(r) = region {
-                                        b.1 = r;
-                                    }
-                                }
-                                None => boxes.push((id.clone(), region.unwrap_or_else(|| panic!("{place} step {}: new box {id} needs \"in\"", i + 1)))),
-                            }
-                        }
-                        for b in &boxes {
-                            assert!(regions.contains(&b.1), "{place} step {}: box {} is in unknown region {}", i + 1, b.0, b.1);
-                        }
-                        for a in step.get("arrows").map(Json::as_array).unwrap_or(&[]) {
-                            for end in ["from", "to"] {
-                                let id = str_of(a, end);
-                                assert!(boxes.iter().any(|b| b.0 == id), "{place} step {}: arrow points at missing box {id}", i + 1);
-                            }
-                        }
-                        if let Some(n) = step.get("line").and_then(Json::as_f64) {
-                            assert!(n >= 1.0 && n <= lines, "{place} step {}: line {n} is outside the code", i + 1);
-                        }
-                        assert!(!str_of(step, "say").is_empty(), "{place} step {}: needs \"say\"", i + 1);
-                    }
+                    let one = Json::obj(vec![("regions", spec.get("regions").cloned().unwrap_or(Json::Arr(vec![]))), ("scenarios", Json::Arr(vec![sc.clone()]))]);
+                    assert_eq!(visual_problems(&one), Vec::<String>::new(), "{place}");
                     if let Some(check) = sc.get("check") {
                         let run_code = check.get("code").and_then(Json::as_str).map(String::from).unwrap_or(code.clone());
                         let full = format!("{}{}", check.get("prelude").and_then(Json::as_str).map(|p| format!("{p}\n")).unwrap_or_default(), run_code);

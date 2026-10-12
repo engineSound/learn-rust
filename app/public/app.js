@@ -9,6 +9,7 @@
 //   POST /api/lessons/:slug/feedback    (easy|right|hard) -> { stats, next }
 //   POST /api/lessons/:slug/log         ({ kind: "hint"|"predict", payload }) -> { ok }
 //   POST /api/lessons/:slug/hint        ({ code, question }) -> { hint }       (Claude tutor)
+//   POST /api/lessons/:slug/visualize   ({ code }) -> { visual, verified, attempts } (Claude tutor)
 //   POST /api/lessons/:slug/drill       -> { slug, title, targets, stats, next } (Claude tutor)
 //   POST /api/snippet                   ({ code }) -> { output, ok, errors, timedOut }
 //   GET  /api/profile                   -> { profile, markdown, next }
@@ -453,6 +454,9 @@
         html += '<ol class="hints">' + hints.slice(0, shown).map(function (h) { return '<li>' + md(h).replace(/^<p>|<\/p>$/g, '') + '</li>'; }).join('') + '</ol>';
         if (shown < hints.length) html += '<button type="button" class="btn" id="hint-more">Show hint ' + (shown + 1) + ' of ' + hints.length + '</button>';
       }
+      if (state.tutor.enabled && afterFail) {
+        html += '<button type="button" class="btn trace-btn" id="trace-btn">▶ Show me what my code does</button><div id="trace-out"></div>';
+      }
       if (state.tutor.enabled) {
         html += '<div class="ask"><input type="text" id="ask-q" placeholder="Or ask the tutor about your code…" aria-label="Question for the tutor">' +
           '<button type="button" class="btn" id="ask-btn">Ask</button></div><div id="ask-out"></div>' +
@@ -468,6 +472,19 @@
       store('hints.' + slug, shown + 1);
       api('POST', '/api/lessons/' + slug + '/log', { kind: 'hint', payload: { source: 'lesson', level: shown + 1, question: null } }, true).catch(function () {});
       renderHelp(afterFail);
+    });
+    var trace = $('trace-btn');
+    if (trace) trace.addEventListener('click', function () {
+      trace.disabled = true;
+      $('trace-out').innerHTML = '<p class="muted">Tracing your code step by step, then checking the trace against your real code (about half a minute)…</p>';
+      api('POST', '/api/lessons/' + slug + '/visualize', { code: code.value }, true).then(function (d) {
+        var v = d.verified || {};
+        $('trace-out').innerHTML = '<div class="trace"><div class="visual" data-spec="' + esc(encodeURIComponent(JSON.stringify(d.visual))) + '"></div>' +
+          '<p class="muted small">✓ Checked on your real code: ' + (v.call ? '<code>' + esc(v.call) + '</code> really gives <code>' + esc(v.prints) + '</code>.' : 'it really fails with <code>' + esc(v.prints) + '</code>.') + '</p></div>';
+        if (window.hydrateVisuals) window.hydrateVisuals($('trace-out'));
+        trace.textContent = '↻ Trace it again';
+      }).catch(function (e) { $('trace-out').innerHTML = '<p class="bad-text">' + esc(e.message) + '</p>'; })
+        .then(function () { trace.disabled = false; });
     });
     var ask = $('ask-btn');
     if (ask) {
@@ -508,7 +525,7 @@
       case 'pass': return ['ok', 'Solved “' + t + '”'];
       case 'fail': return ['bad', (p.errors && p.errors.length ? 'Didn’t compile (' + p.errors.slice(0, 2).join(', ') + ')' : p.passed + ' of ' + p.total + ' checks passed') + ' on “' + t + '”'];
       case 'feedback': return ['info', 'Rated “' + t + '” ' + ({ easy: 'too easy', right: 'about right', hard: 'too hard' }[p.difficulty] || p.difficulty)];
-      case 'hint': return ['info', p.source === 'lesson' ? 'Used hint ' + p.level + ' on “' + t + '”' : 'Asked the tutor about “' + t + '”' + (p.question ? ': ' + p.question : '')];
+      case 'hint': return ['info', p.source === 'lesson' ? 'Used hint ' + p.level + ' on “' + t + '”' : p.source === 'visual' ? 'Watched the tutor trace your code on “' + t + '”' : 'Asked the tutor about “' + t + '”' + (p.question ? ': ' + p.question : '')];
       case 'predict': return ['info', 'Quick check on “' + t + '”: ' + (p.correct ? 'right' : 'not quite')];
       case 'generated': return ['new', 'The tutor made a new exercise: “' + t + '”'];
       case 'reset': return ['info', 'Started over on “' + t + '”'];

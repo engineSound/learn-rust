@@ -407,6 +407,35 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                     }
                 })
             }
+            ("POST", "visualize") => {
+                let body = json::parse(if req.body.trim().is_empty() { "{}" } else { &req.body }).unwrap_or(Json::Obj(vec![]));
+                let code = body.get("code").and_then(Json::as_str).unwrap_or("").to_string();
+                save_code(paths, &lesson, &code).and_then(|_| runner::run_lesson(&lesson, &code, &paths.data)).map(|result| {
+                    if history::is_pass(&result) {
+                        return Response::error(400, "Every check passes now: nothing to trace.");
+                    }
+                    if result.get("timedOut").and_then(Json::as_bool) == Some(true) {
+                        return Response::error(400, "Your code runs forever, so there is nothing to trace yet. Look for a loop that never ends.");
+                    }
+                    let events = history::read_events(&paths.events);
+                    let ctx = tutor_context(paths, &profile_of(paths, &events));
+                    let title = lesson.get("title").and_then(Json::as_str).unwrap_or(&lesson.slug).to_string();
+                    match tutor::visualize_run(&ctx, &title, &lesson.body, &lesson.file, &code, Some(&result)) {
+                        Ok(trace) => {
+                            log("hint", None, Json::obj(vec![("source", Json::str("visual")), ("question", Json::Null)]));
+                            Response::json(
+                                200,
+                                Json::obj(vec![
+                                    ("visual", trace.visual),
+                                    ("verified", Json::obj(vec![("call", Json::Str(trace.call)), ("prints", Json::Str(trace.prints))])),
+                                    ("attempts", Json::Num(trace.attempts as f64)),
+                                ]),
+                            )
+                        }
+                        Err(e) => tutor_error(e),
+                    }
+                })
+            }
             ("POST", "drill") => Ok(make_drill(paths, &lesson)),
             ("POST", "log") => {
                 let body = json::parse(if req.body.trim().is_empty() { "{}" } else { &req.body }).unwrap_or(Json::Obj(vec![]));
