@@ -11,7 +11,7 @@ everything so a tutor (Claude) can adapt to me.
 browser ──► std-only HTTP server ──► runner (cargo test in a lesson copy, 120 s timeout)
                  │
                  ├──► data/events.jsonl  (event log, see SHARED-FORMAT.md)
-                 ├──► profile builder → data/profile.md
+                 ├──► profile → PROGRESS.md (generated block)
                  └──► tutor: Claude API (profile + lesson + my code + compiler output)
 ```
 
@@ -27,16 +27,18 @@ browser ──► std-only HTTP server ──► runner (cargo test in a lesson 
   `cargo test` with a shared `data/target/`, so rebuilds take about a second.
   It parses compiler errors (keeping codes like `E0382`, dropping warnings)
   and libtest results into JSON. One run at a time.
+- **Profile** (`app/src/profile.rs`): derives concept mastery, the review
+  schedule, recurring mistakes and the next step from the events (rules in
+  `docs/SHARED-FORMAT.md`), and rewrites the generated block in `PROGRESS.md`
+  after every run.
 - **Server** (`app/src/main.rs`): the API in `docs/SHARED-FORMAT.md`.
   Listens on 127.0.0.1 only unless `HOST` is set.
 - **History** (`app/history.rs`): every lesson open and every run is
   appended to `data/events.jsonl`; per-lesson stats are derived from it on
   each request. The file lives only on the machine running the app (it's
-  gitignored). The learner profile (M3) is the summary that gets committed.
+  gitignored). The learner profile is the summary that gets committed.
   Compiler error codes are stored with each `fail` event, because repeated
   codes are the clearest sign of what to review.
-- **Profile builder:** after each session, recomputes per-concept mastery and
-  review dates (spaced repetition) and writes `data/profile.md`.
 - **Tutor:** called only when I ask, or after repeated failures. Prompt =
   profile + lesson.md + my code + compiler output. API key in `.env`
   (`ANTHROPIC_API_KEY`), never committed.

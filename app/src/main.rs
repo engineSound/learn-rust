@@ -4,6 +4,7 @@
 mod history;
 mod json;
 mod lessons;
+mod profile;
 mod runner;
 
 use json::Json;
@@ -19,6 +20,7 @@ struct Paths {
     lessons: PathBuf,
     data: PathBuf,
     events: PathBuf,
+    progress: PathBuf,
     public: PathBuf,
 }
 
@@ -52,6 +54,7 @@ fn main() {
         lessons: root.join("lessons"),
         data: root.join("data"),
         events: std::env::var_os("LEARN_EVENTS").map(PathBuf::from).unwrap_or_else(|| root.join("data").join("events.jsonl")),
+        progress: std::env::var_os("LEARN_PROGRESS").map(PathBuf::from).unwrap_or_else(|| root.join("PROGRESS.md")),
         public: root.join("app").join("public"),
     }));
     let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".into());
@@ -134,6 +137,41 @@ fn save_code(paths: &Paths, lesson: &lessons::Lesson, code: &str) -> std::io::Re
     fs::write(p, code)
 }
 
+fn profile_of(paths: &Paths, events: &[Json]) -> Json {
+    let refs: Vec<profile::LessonRef> = lessons::list(&paths.lessons)
+        .iter()
+        .map(|l| profile::LessonRef {
+            id: l.get("id").and_then(Json::as_str).unwrap_or(&l.slug).to_string(),
+            title: l.get("title").and_then(Json::as_str).unwrap_or(&l.slug).to_string(),
+            concepts: l.get("concepts").map(Json::as_array).unwrap_or(&[]).iter().filter_map(Json::as_str).map(String::from).collect(),
+        })
+        .collect();
+    profile::build_profile(TRACK, &refs, events, &history::now_iso())
+}
+
+/// History stats for one lesson plus its review schedule from the profile.
+fn stats_for(events: &[Json], profile: &Json, lesson_id: Option<&Json>) -> Json {
+    let mut stats = history::lesson_stats(events, lesson_id);
+    let entry = profile.get("lessons").map(Json::as_array).unwrap_or(&[]).iter().find(|l| l.get("id") == lesson_id);
+    if let Json::Obj(fields) = &mut stats {
+        for key in ["review_step", "due"] {
+            fields.push((key.to_string(), entry.and_then(|e| e.get(key)).cloned().unwrap_or(Json::Null)));
+        }
+        fields.push(("due_now".to_string(), entry.and_then(|e| e.get("due_now")).cloned().unwrap_or(Json::Bool(false))));
+    }
+    stats
+}
+
+/// After a run or reset: refresh the generated profile block in PROGRESS.md.
+fn refresh_progress(paths: &Paths, lesson_id: Option<&Json>) -> Json {
+    let events = history::read_events(&paths.events);
+    let profile = profile_of(paths, &events);
+    if let Err(e) = profile::write_progress(&paths.progress, &profile::profile_markdown(&profile)) {
+        eprintln!("couldn't update PROGRESS.md: {e}");
+    }
+    stats_for(&events, &profile, lesson_id)
+}
+
 fn handle(req: &Request, paths: &Paths) -> Response {
     let method = req.method.as_str();
     let path = req.path.as_str();
@@ -146,6 +184,7 @@ fn handle(req: &Request, paths: &Paths) -> Response {
     }
     if method == "GET" && path == "/api/lessons" {
         let events = history::read_events(&paths.events);
+        let profile = profile_of(paths, &events);
         let list = lessons::list(&paths.lessons)
             .into_iter()
             .map(|l| {
@@ -155,11 +194,16 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                     ("title", l.get("title").cloned().unwrap_or_else(|| Json::str(l.slug.clone()))),
                     ("minutes", l.get("minutes").cloned().unwrap_or(Json::Null)),
                     ("concepts", l.get("concepts").cloned().unwrap_or(Json::Arr(vec![]))),
-                    ("stats", history::lesson_stats(&events, l.get("id"))),
+                    ("stats", stats_for(&events, &profile, l.get("id"))),
                 ])
             })
             .collect();
         return Response::json(200, Json::Arr(list));
+    }
+    if method == "GET" && path == "/api/profile" {
+        let profile = profile_of(paths, &history::read_events(&paths.events));
+        let markdown = profile::profile_markdown(&profile);
+        return Response::json(200, Json::obj(vec![("profile", profile), ("markdown", Json::Str(markdown))]));
     }
 
     if let Some(rest) = path.strip_prefix("/api/lessons/") {
@@ -178,7 +222,10 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                 eprintln!("couldn't record history: {e}");
             }
         };
-        let stats = || history::lesson_stats(&history::read_events(&paths.events), id.as_ref());
+        let stats = || {
+            let events = history::read_events(&paths.events);
+            stats_for(&events, &profile_of(paths, &events), id.as_ref())
+        };
         let result: std::io::Result<Response> = match (method, action) {
             ("GET", "") => {
                 let saved = fs::read_to_string(work_path(paths, &lesson)).ok();
@@ -200,7 +247,8 @@ fn handle(req: &Request, paths: &Paths) -> Response {
             ("DELETE", "code") => {
                 fs::remove_file(work_path(paths, &lesson)).ok();
                 log("reset", None, Json::Null);
-                Ok(Response::json(200, Json::obj(vec![("code", Json::str(lesson.starter.clone()))])))
+                let stats = refresh_progress(paths, id.as_ref());
+                Ok(Response::json(200, Json::obj(vec![("code", Json::str(lesson.starter.clone())), ("stats", stats)])))
             }
             ("POST", "run") => save_code(paths, &lesson, &req.body)
                 .and_then(|_| runner::run_lesson(&lesson, &req.body, &paths.data))
@@ -210,7 +258,7 @@ fn handle(req: &Request, paths: &Paths) -> Response {
                     log(kind, duration, history::run_payload(&result, &req.body));
                     let mut result = result;
                     if let Json::Obj(fields) = &mut result {
-                        fields.push(("stats".to_string(), stats()));
+                        fields.push(("stats".to_string(), refresh_progress(paths, id.as_ref())));
                     }
                     Response::json(200, result)
                 }),

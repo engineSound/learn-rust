@@ -42,10 +42,11 @@ Both apps serve the same JSON API, and `app/public/` (the browser UI) is
 |-----------------|------|---------|
 | `GET /api/info` | | `{ track, title, accent }` |
 | `GET /api/lessons` | | `[{ slug, id, title, minutes, concepts }]` |
-| `GET /api/lessons/:slug` | | `{ slug, meta, body, file, code, saved }` |
+| `GET /api/lessons/:slug` | | `{ slug, meta, body, file, code, saved, stats }` |
 | `PUT /api/lessons/:slug/code` | code as plain text | `{ saved: true }` |
-| `DELETE /api/lessons/:slug/code` | | `{ code }` (the starter) |
-| `POST /api/lessons/:slug/run` | code as plain text | run result (below) |
+| `DELETE /api/lessons/:slug/code` | | `{ code, stats }` (back to the starter) |
+| `GET /api/profile` | | `{ profile, markdown }` (section 4) |
+| `POST /api/lessons/:slug/run` | code as plain text | run result (below) plus `stats` |
 
 Run result: `{ passed, failed, total, tests: [{ name, ok, message }],
 compileErrors: [{ code, title, message }], timedOut, durationMs, output }`.
@@ -88,8 +89,8 @@ Run payload: `{ passed, failed, total, failing: [test names],
 errors: [compiler error codes or titles], timed_out, code }`. `code` is
 what was run, capped at 64 KB.
 
-Reserved for later milestones: `hint`, `question` (tutor, M4) and `review`
-(spaced repetition, M3). Sessions aren't recorded as events; a session is
+Reserved for the tutor (M4): `hint` and `question`. Reviews aren't a
+separate kind: a passing run on a lesson that's due counts as a review. Sessions aren't recorded as events; a session is
 derived as a run of events with no gap longer than 30 minutes.
 
 Everything else (per-lesson stats, mastery, the review schedule, the learner
@@ -103,16 +104,53 @@ tests).
 
 ## 4. Learner profile
 
-Regenerated after each session from the events and saved as
-`data/profile.md`. The tutor reads it at the start of every session. It holds:
+Derived from the events after every run and reset, and written into
+`PROGRESS.md` between `<!-- profile:start -->` and `<!-- profile:end -->`
+(everything outside that block is left alone). `PROGRESS.md` is committed,
+so the tutor and any Claude session can read it; the raw events stay local.
+`GET /api/profile` returns `{ profile, markdown }`.
 
-- per concept: mastery (0–1), last practiced, next review date
-- recurring errors (e.g. Rust `E0382` seen 4 times)
-- what to do next
+Both apps must produce **exactly** the output in `docs/fixtures/`
+(`profile-input.json` → `profile-expected.json` and `profile-expected.md`);
+each app's tests check this. Change the rules in both apps and regenerate the
+fixtures together.
 
-Review timing uses spaced repetition, as in language learning: each
-successful recall pushes the next review further out (1, 3, 7, 16, 35 days),
-and a failure resets it.
+**Review schedule (spaced repetition, per lesson).** Intervals are 1, 3, 7,
+16 and 35 days, as with language-learning flashcards.
+
+- The first passing run solves the lesson: review step 0, due 1 day later.
+- Runs before the due time don't count as reviews.
+- Once due, a passing run moves up one step (capped at the last) and sets the
+  next due date from that run. A failing run marks the review as lapsed; the
+  next pass then restarts at step 0 (due 1 day later).
+
+**Mastery (0–1, per concept).** Average over the lessons that list the
+concept and have at least one run:
+
+| Lesson state | Score |
+|--------------|-------|
+| started, not solved | 0.2 |
+| solved on run 1 / runs 2–3 / run 4 or later | 0.7 / 0.6 / 0.5 |
+| plus each review step reached | +0.1 |
+| review currently lapsed | −0.2 |
+
+Clamped to 0–1 and rounded to 2 decimals; `null` if never practiced.
+
+**Recurring mistakes.** Across failing runs, count each compiler error code
+(or title) and each failing test name; keep those seen at least twice, most
+frequent first (ties alphabetical), top 5.
+
+**Sessions.** Events with gaps of at most 30 minutes form a session; total
+minutes is the sum of session spans. The streak counts consecutive UTC days
+with any event, ending today or yesterday.
+
+**Next step.** The lesson whose review has been due longest; otherwise the
+first unsolved lesson in order; otherwise "all lessons solved" with the next
+review date.
+
+The lesson `stats` in the API also carry `review_step`, `due` and `due_now`
+from the profile. The UI marks due lessons with ↻ and opens the most overdue
+one on start.
 
 ## 5. Session shape (under 3 h/week, short daily sessions)
 

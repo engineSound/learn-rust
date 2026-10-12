@@ -3,13 +3,14 @@
 //   GET  /api/lessons                   -> [{ slug, id, title, minutes, concepts, stats }]
 //   GET  /api/lessons/:slug             -> { slug, meta, body, file, code, saved, stats }
 //   PUT  /api/lessons/:slug/code        (text body) -> { saved: true }
-//   DELETE /api/lessons/:slug/code      -> { code }  (back to the starter)
+//   DELETE /api/lessons/:slug/code      -> { code, stats }  (back to the starter)
+//   GET  /api/profile                   -> { profile, markdown }
 //   POST /api/lessons/:slug/run         (text body) -> run result + stats
 // `stats` is the learner's history for that lesson (see SHARED-FORMAT.md).
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var select = $('lesson-select'), code = $('code'), gutter = $('gutter');
-  var runBtn = $('run-btn'), resetBtn = $('reset-btn'), results = $('results'), saveState = $('save-state');
+  var runBtn = $('run-btn'), resetBtn = $('reset-btn'), profileBtn = $('profile-btn'), results = $('results'), saveState = $('save-state');
   var current = null, saveTimer = null, lessonList = [];
 
   function api(method, path, body) {
@@ -34,18 +35,19 @@
   }
   function statusText(st) {
     if (!st || !st.runs) return 'New';
+    if (st.due_now) return '↻ Review due';
     if (st.first_pass_run) return '✓ Solved on run ' + st.first_pass_run;
     var runs = st.runs + (st.runs === 1 ? ' run' : ' runs');
     return st.total ? runs + ', best ' + st.best_passed + '/' + st.total : runs + ', not compiling yet';
   }
   function optionLabel(l) {
-    var done = l.stats && l.stats.first_pass_run;
-    return (done ? '✓ ' : '') + l.title + ' · ' + (l.minutes || '?') + ' min';
+    var st = l.stats || {};
+    return (st.due_now ? '↻ ' : st.first_pass_run ? '✓ ' : '') + l.title + ' · ' + (l.minutes || '?') + ' min';
   }
   function updateStats(stats) {
     current.stats = stats;
     $('lesson-status').textContent = statusText(stats);
-    $('lesson-status').className = 'chip status' + (stats && stats.first_pass_run ? ' done' : '');
+    $('lesson-status').className = 'chip status' + (stats && stats.due_now ? ' due' : stats && stats.first_pass_run ? ' done' : '');
     lessonList.forEach(function (l) { if (l.slug === current.slug) l.stats = stats; });
     var opt = select.querySelector('option[value="' + current.slug + '"]');
     var item = lessonList.filter(function (l) { return l.slug === current.slug; })[0];
@@ -103,7 +105,8 @@
       saveState.textContent = l.saved ? 'Your saved code' : 'Starter code';
       var st = l.stats, last = st && st.last_ts ? '<p class="muted small">Last run ' + esc(ago(st.last_ts)) + ': ' +
         (st.last_result === 'pass' ? 'all tests passed.' : 'not all tests passed yet.') + '</p>' : '';
-      results.innerHTML = last + '<p class="muted">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (or <kbd>⌘</kbd>+<kbd>Enter</kbd>) to run the tests.</p>';
+      var review = st && st.due_now ? '<p><strong>Due for review.</strong> Press <strong>Reset</strong> to start again from the starter code, then solve it from memory.</p>' : '';
+      results.innerHTML = review + last + '<p class="muted">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (or <kbd>⌘</kbd>+<kbd>Enter</kbd>) to run the tests.</p>';
     });
   }
 
@@ -160,9 +163,20 @@
     resetBtn.dataset.armed = ''; resetBtn.textContent = 'Reset';
     api('DELETE', '/api/lessons/' + current.slug + '/code').then(function (d) {
       code.value = d.code; updateGutter(); saveState.textContent = 'Starter code';
+      if (d.stats) updateStats(d.stats);
     });
   });
   select.addEventListener('change', function () { showLesson(select.value); });
+
+  // Profile: shown in the lesson pane; the same text the app writes into PROGRESS.md.
+  profileBtn.addEventListener('click', function () {
+    api('GET', '/api/profile').then(function (d) {
+      var md = d.markdown.split('\n').filter(function (l) { return l.indexOf('<!--') !== 0; }).join('\n');
+      $('lesson').innerHTML = '<p><button id="back-btn" class="ghost" type="button">← Back to the lesson</button></p>' +
+        window.renderMarkdown(md) + '<p class="muted small">This is also written to <code>PROGRESS.md</code> after every run. Commit it so Claude sessions can see your progress.</p>';
+      $('back-btn').addEventListener('click', function () { if (current) showLesson(current.slug); });
+    }).catch(function (e) { $('lesson').innerHTML = '<p class="summary bad">Couldn’t load your profile: ' + esc(e.message) + '</p>'; });
+  });
 
   api('GET', '/api/info').then(function (info) {
     document.title = info.title;
@@ -175,8 +189,11 @@
       return '<option value="' + esc(l.slug) + '">' + esc(optionLabel(l)) + '</option>';
     }).join('');
     if (!lessons.length) { $('lesson').innerHTML = '<p>No lessons found in <code>lessons/</code>.</p>'; return; }
+    // Open a lesson that's due for review first; otherwise where you left off.
+    var due = lessons.filter(function (l) { return l.stats && l.stats.due_now; })
+      .sort(function (a, b) { return a.stats.due < b.stats.due ? -1 : 1; })[0];
     var saved = recall();
-    var start = lessons.some(function (l) { return l.slug === saved; }) ? saved : lessons[0].slug;
+    var start = due ? due.slug : lessons.some(function (l) { return l.slug === saved; }) ? saved : lessons[0].slug;
     return showLesson(start);
   }).catch(function (e) {
     $('lesson').innerHTML = '<p class="summary bad">Couldn’t reach the server: ' + esc(e.message) + '</p>';

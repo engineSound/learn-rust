@@ -112,7 +112,7 @@ pub fn now_iso() -> String {
     iso_from_millis(d.as_millis() as i64)
 }
 
-fn iso_from_millis(ms: i64) -> String {
+pub fn iso_from_millis(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
     // Civil-from-days (Howard Hinnant's algorithm).

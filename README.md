@@ -13,7 +13,7 @@ so they can merge into one multi-language tutor later.
 - [x] Lesson 01
 - [x] Web app (M1): lesson list, editor, Run button → compiler errors and test results in about a second
 - [x] Learning history (M2): every run recorded; each lesson shows runs, best score and when you solved it
-- [ ] Learner profile and review schedule
+- [x] Learner profile (M3): concept mastery, spaced-repetition reviews, recurring mistakes and the next step, written into `PROGRESS.md` after every run
 - [ ] Tutor (Claude API) reading the profile
 - [ ] Docker setup; deploy to AWS
 

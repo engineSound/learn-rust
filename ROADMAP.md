@@ -56,6 +56,6 @@ A **vocabulary API with spaced repetition**, the same project as the
 |-----------|--------------|
 | M1 ✅ | Website lists lessons; editor; **Run** shows compiler and test output |
 | M2 ✅ | Every run, pass and fail saved to the history log (`data/events.jsonl`) |
-| M3 | Learner profile generated after each session; review items scheduled |
+| M3 ✅ | Learner profile generated after each session; review items scheduled |
 | M4 | Tutor: explanations of compiler errors from Claude, aware of your profile |
 | M5 | Docker; deploy to an existing EC2 instance behind a login |
