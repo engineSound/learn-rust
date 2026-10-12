@@ -39,8 +39,9 @@ browser ──► std-only HTTP server ──► runner (cargo test in a lesson 
   gitignored). The learner profile is the summary that gets committed.
   Compiler error codes are stored with each `fail` event, because repeated
   codes are the clearest sign of what to review.
-- **Tutor:** called only when I ask, or after repeated failures. Prompt =
-  profile + lesson.md + my code + compiler output. API key in `.env`
+- **Tutor** (`app/tutor.rs`, optional): hints and newly generated,
+  verified drills from Claude, using the shared prompts in `docs/tutor/`.
+  Rules in `docs/SHARED-FORMAT.md`, section 6. API key in `.env`
   (`ANTHROPIC_API_KEY`), never committed.
 
 ## Running it

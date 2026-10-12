@@ -1,5 +1,5 @@
 // Front end shared by learn-nodejs and learn-rust. Both servers expose the same API:
-//   GET  /api/info                      -> { track, title, accent }
+//   GET  /api/info                      -> { track, title, accent, tutor: { enabled, reason } }
 //   GET  /api/lessons                   -> [{ slug, id, title, minutes, concepts, kind, for, stats }]
 //   GET  /api/lessons/:slug             -> { slug, meta, body, file, code, saved, stats }
 //   PUT  /api/lessons/:slug/code        (text body) -> { saved: true }
@@ -7,13 +7,15 @@
 //   POST /api/lessons/:slug/run         (text body) -> run result + { stats, next }
 //   POST /api/lessons/:slug/feedback    (easy|right|hard) -> { stats, next }
 //   GET  /api/profile                   -> { profile, markdown, next }
+//   POST /api/lessons/:slug/hint        ({ code, question }) -> { hint }
+//   POST /api/lessons/:slug/drill       -> { slug, title, targets, stats, next }  (a new, verified drill)
 // `next` is the adaptive next step (SHARED-FORMAT.md, section 5) plus its `slug`.
 // `stats` is the learner's history for that lesson (see SHARED-FORMAT.md).
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var select = $('lesson-select'), code = $('code'), gutter = $('gutter');
   var runBtn = $('run-btn'), resetBtn = $('reset-btn'), profileBtn = $('profile-btn'), results = $('results'), saveState = $('save-state');
-  var current = null, saveTimer = null, lessonList = [];
+  var current = null, saveTimer = null, lessonList = [], tutor = { enabled: false, reason: null };
 
   function api(method, path, body) {
     return fetch(path, { method: method, body: body, headers: body != null ? { 'Content-Type': 'text/plain; charset=utf-8' } : {} })
@@ -109,7 +111,8 @@
       var st = l.stats, last = st && st.last_ts ? '<p class="muted small">Last run ' + esc(ago(st.last_ts)) + ': ' +
         (st.last_result === 'pass' ? 'all tests passed.' : 'not all tests passed yet.') + '</p>' : '';
       var review = st && st.due_now ? '<p><strong>Due for review.</strong> Press <strong>Reset</strong> to start again from the starter code, then solve it from memory.</p>' : '';
-      results.innerHTML = review + last + '<p class="muted">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (or <kbd>⌘</kbd>+<kbd>Enter</kbd>) to run the tests.</p>';
+      results.innerHTML = review + last + '<p class="muted">Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> (or <kbd>⌘</kbd>+<kbd>Enter</kbd>) to run the tests.</p>' + tutorBox();
+      wireTutor();
     });
   }
 
@@ -146,9 +149,11 @@
         '<button type="button" class="ghost" data-rate="hard">Too hard</button></div>');
     }
     html.push('<div id="next-card"></div>');
+    if (!allOk) html.push(tutorBox());
     if (r.output) html.push('<details><summary>Full output</summary><pre>' + esc(r.output) + '</pre></details>');
     results.innerHTML = html.join('');
     showNext(r.next);
+    wireTutor();
     var rate = $('rate');
     if (rate) rate.addEventListener('click', function (e) {
       var d = e.target.getAttribute('data-rate');
@@ -158,6 +163,44 @@
         if (res.stats) updateStats(res.stats);
         showNext(res.next);
       });
+    });
+  }
+
+  // The tutor (Claude): a hint for the current code, or a new drill aimed at what's hard.
+  function tutorBox() {
+    if (!tutor.enabled) return tutor.reason ? '<p class="muted small tutor-off">Tutor off: ' + esc(tutor.reason) + '</p>' : '';
+    return '<div class="tutor"><input id="tutor-q" type="text" placeholder="Ask the tutor (optional)" aria-label="Question for the tutor">' +
+      '<button type="button" id="hint-btn">Hint</button>' +
+      '<button type="button" class="ghost" id="drill-btn" title="Claude writes a new drill aimed at what you find hard, and checks it before you see it">New drill on this</button></div>' +
+      '<div id="tutor-out"></div>';
+  }
+  function wireTutor() {
+    var hintBtn = $('hint-btn'), drillBtn = $('drill-btn'), out = $('tutor-out');
+    if (!hintBtn) return;
+    hintBtn.addEventListener('click', function () {
+      if (!current) return;
+      hintBtn.disabled = true; out.innerHTML = '<p class="muted">Thinking about your code…</p>';
+      api('POST', '/api/lessons/' + current.slug + '/hint', JSON.stringify({ code: code.value, question: $('tutor-q').value }))
+        .then(function (d) { out.innerHTML = '<div class="tutor-reply">' + window.renderMarkdown(d.hint) + '</div>'; out.scrollIntoView({ block: 'nearest' }); })
+        .catch(function (e) { out.innerHTML = '<p class="summary bad">' + esc(e.message) + '</p>'; })
+        .then(function () { hintBtn.disabled = false; });
+    });
+    drillBtn.addEventListener('click', function () {
+      if (!current) return;
+      drillBtn.disabled = true; hintBtn.disabled = true;
+      out.innerHTML = '<p class="muted">Writing a new drill for you and checking it against a working solution. This takes about a minute…</p>';
+      api('POST', '/api/lessons/' + current.slug + '/drill', '{}').then(function (d) {
+        return api('GET', '/api/lessons').then(function (lessons) {
+          lessonList = lessons;
+          select.innerHTML = lessons.map(function (l) { return '<option value="' + esc(l.slug) + '">' + esc(optionLabel(l)) + '</option>'; }).join('');
+          select.value = current.slug;
+          out.innerHTML = '<div class="next"><div><strong>New drill:</strong> ' + esc(d.title) + '<div class="muted small">' + esc(d.targets) + '</div></div>' +
+            '<button type="button" id="open-drill">Open</button></div>';
+          $('open-drill').addEventListener('click', function () { showLesson(d.slug); });
+          out.scrollIntoView({ block: 'nearest' });
+        });
+      }).catch(function (e) { out.innerHTML = '<p class="summary bad">' + esc(e.message) + '</p>'; })
+        .then(function () { drillBtn.disabled = false; hintBtn.disabled = false; });
     });
   }
 
@@ -216,6 +259,7 @@
 
   api('GET', '/api/info').then(function (info) {
     document.title = info.title;
+    tutor = info.tutor || tutor;
     $('track-title').textContent = info.title;
     if (info.accent) document.documentElement.style.setProperty('--accent', info.accent);
     return api('GET', '/api/lessons');

@@ -44,6 +44,11 @@ button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2p
 .chip { font-size: 12px; font-family: var(--mono); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
 .chip.status { color: var(--ink); border-color: var(--muted); }
 .chip.status.done { color: var(--pass); border-color: var(--pass); }
+.tutor { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.tutor input { flex: 1; min-width: 160px; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+.tutor-reply { margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--code-bg); border-radius: 4px; }
+.tutor-reply p { margin: .3em 0; }
+.tutor-reply code { font-size: .9em; }
 .rate { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0 4px; }
 .rate button { padding: 4px 10px; font-weight: 500; }
 .next { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: 8px; }

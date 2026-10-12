@@ -15,7 +15,7 @@ so they can merge into one multi-language tutor later.
 - [x] Learning history (M2): every run recorded; each lesson shows runs, best score and when you solved it
 - [x] Learner profile (M3): concept mastery, spaced-repetition reviews, recurring mistakes and the next step, written into `PROGRESS.md` after every run
 - [x] Adaptive path (M3.5): reviews use fresh drills; struggles get extra drills, easy wins get stretch exercises; rate each exercise too easy / about right / too hard
-- [ ] Tutor (Claude API): hints, explanations and newly generated drills aimed at your mistakes
+- [x] Tutor (M4, optional): hints for your code and new drills aimed at your mistakes, verified before you see them
 - [ ] Docker setup; deploy to AWS
 
 ## Start the app
@@ -37,6 +37,24 @@ appear with their codes (like `E0308`). Your code is saved as you type, in
 fail until you solve them).
 
 Without the app: `cd lessons/01-bindings-expressions && cargo test`.
+
+## The tutor (optional)
+
+Hints for your current code, and new drills written for your mistakes, from
+Claude. Without it, everything else still works.
+
+1. Create an API key at https://console.anthropic.com/ (billed per use,
+   separate from a Claude subscription; roughly 2–5 cents per hint and
+   10–30 cents per new drill).
+2. `cp .env.example .env` and put the key after `ANTHROPIC_API_KEY=`.
+   `.env` is never committed.
+3. Restart `cargo run`. (The app calls the API with your Mac's built-in
+   `curl`; nothing else to install.)
+
+Then, under any test result: **Hint** (optionally type a question first), or
+**New drill on this**, which writes a drill aimed at what you find hard,
+checks it against a working solution, and adds it to the lesson list.
+
 
 ## Docs
 

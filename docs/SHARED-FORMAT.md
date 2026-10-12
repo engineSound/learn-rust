@@ -28,6 +28,8 @@ contrast: java                 # language the explanation compares against
 edit: exercise.js              # the file the learner edits (Rust: src/lib.rs)
 kind: core                     # core (default) | drill | stretch
 for: node-01-values-functions  # drills and stretches only: the core lesson they practise
+generated: true                # only on drills written by the tutor (section 6)
+targets: One sentence on what the drill aims at   # generated drills only
 ```
 
 **Kinds.** A *core* lesson moves the learner forward along the roadmap. Each
@@ -52,7 +54,7 @@ Both apps serve the same JSON API, and `app/public/` (the browser UI) is
 
 | Method and path | Body | Returns |
 |-----------------|------|---------|
-| `GET /api/info` | | `{ track, title, accent }` |
+| `GET /api/info` | | `{ track, title, accent, tutor: { enabled, reason } }` |
 | `GET /api/lessons` | | `[{ slug, id, title, minutes, concepts, kind, for, stats }]` |
 | `GET /api/lessons/:slug` | | `{ slug, meta, body, file, code, saved, stats }` |
 | `PUT /api/lessons/:slug/code` | code as plain text | `{ saved: true }` |
@@ -60,6 +62,12 @@ Both apps serve the same JSON API, and `app/public/` (the browser UI) is
 | `POST /api/lessons/:slug/run` | code as plain text | run result (below) plus `stats`, `next` |
 | `POST /api/lessons/:slug/feedback` | `easy`, `right` or `hard` | `{ stats, next }` |
 | `GET /api/profile` | | `{ profile, markdown, next }` (section 4) |
+| `POST /api/lessons/:slug/hint` | JSON `{ code, question }` | `{ hint }` (Markdown; section 6) |
+| `POST /api/lessons/:slug/drill` | | `{ slug, id, title, targets, attempts, stats, next }`: a new verified drill (section 6) |
+
+Tutor errors come back as `{ error }` with status 401 (key rejected), 429
+(rate-limited), 502 (API error, refusal, or no drill passed its checks) or
+503 (tutor not set up).
 
 `next` is the adaptive next step (section 5) with the `slug` of its lesson
 folder added, or `slug: null`.
@@ -106,8 +114,10 @@ Run payload: `{ passed, failed, total, failing: [test names],
 errors: [compiler error codes or titles], timed_out, code }`. `code` is
 what was run, capped at 64 KB.
 
-Reserved for the tutor (M4): `hint` and `question`. Reviews aren't a
-separate kind: a passing run on a lesson that's due counts as a review. Sessions aren't recorded as events; a session is
+| `hint` | the tutor gave a hint | `{ question: string \| null }` |
+| `generated` | the tutor wrote a new drill (`lesson_id` is the new drill) | `{ for, targets, attempts }` |
+
+Reviews aren't a separate kind: a passing run on a lesson that's due counts as a review. Sessions aren't recorded as events; a session is
 derived as a run of events with no gap longer than 30 minutes.
 
 Everything else (per-lesson stats, mastery, the review schedule, the learner
@@ -195,11 +205,46 @@ order. The UI opens it on start and shows it after every run and rating;
 `drill`, `stretch`, `lesson` or `done` (then `lesson_id` and `title` are
 `null`). `reason` is a short human-readable explanation shown in the UI.
 
-What's not adaptive yet, and comes with the tutor (M4): generating *new*
-drills aimed at recurring mistakes, and explanations in the learner's style.
-Those need an LLM; see `ROADMAP.md`.
+The rules choose among exercises that exist. The tutor (section 6) adds new
+ones aimed at the learner's mistakes; once saved, a generated drill is an
+ordinary drill to these rules (reviews, extra practice, warm-ups).
 
-## 6. Session shape (under 3 h/week, short daily sessions)
+## 6. Tutor (Claude)
+
+Optional: on when `ANTHROPIC_API_KEY` is set (in `.env`, never committed).
+Everything else works without it. Model `claude-opus-5-5`, with
+`fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) so a declined
+request is retried on Anthropic's recommended fallback model. Node uses the
+official SDK (`@anthropic-ai/sdk`); Rust has no official SDK and calls the
+Messages API over raw HTTP through the system `curl`, passing the key in a
+private temporary config file, never on the command line.
+
+The prompts are shared files in `docs/tutor/` (identical in both repos):
+`system.md` (persona; includes the learner's own "## Learner" section of
+`PROGRESS.md` and the generated profile), `hint.md`, `drill.md`,
+`conventions-<track>.md` and `drill-schema.json`.
+
+**Hint** (effort `medium`). The app runs the tests on the learner's current
+code first, then asks for the smallest hint that unblocks them, under 120
+words, never the solution; compiler error codes are explained first.
+
+**New drill** (effort `high`, structured output with `drill-schema.json`).
+Aimed at the exercise's core lesson, using what the profile says: runs and
+rating on that lesson, the mastery of its concepts, recurring mistakes and the
+latest failing runs. Existing exercises for the lesson are included so the
+drill is new code. Before anything is saved, the app checks the drill:
+
+1. the starter code loads/compiles and runs at least 2 tests;
+2. at least one test fails against the starter (the tests check something);
+3. the reference solution passes every test.
+
+A drill that fails a check is sent back once with the reason; a second
+failure is reported to the learner and nothing is saved. A drill that passes
+is saved as `lessons/<NN>g-<slug>/` (`kind: drill`, `for:` the core lesson,
+`generated: true`, concepts limited to the lesson's), and its solution as
+`data/solutions/<slug>/` (local only; never shown to the learner).
+
+## 7. Session shape (under 3 h/week, short daily sessions)
 
 A ~20 minute session:
 

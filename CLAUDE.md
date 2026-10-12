@@ -18,7 +18,9 @@ learning, style, progress and reviews.** Nothing is one-size-fits-all:
 - The learner rates each solved exercise (too easy / about right / too hard);
   respect that signal together with runs-to-solve and recurring mistakes.
 - When adding content, add drills and stretches for each core lesson, not just
-  the next core lesson. The tutor (M4) will generate targeted drills too.
+  the next core lesson. The in-app tutor also generates targeted drills
+  (`lessons/NNg-*`, `generated: true`); its prompts are in `docs/tutor/`,
+  shared with the other repo.
 
 Teaching rules:
 - The learner is a professional Java developer. Contrast with Java; skip
