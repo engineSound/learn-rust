@@ -1,9 +1,10 @@
 # Shared format
 
-`learn-nodejs` and `learn-rust` are independent apps. They follow the same
-**lesson format** and **history format** so they can later merge into one
-multi-language tutor without losing any learning history. Keep this file
-identical in both repos; change it in both or neither.
+`learn-nodejs`, `learn-rust`, `learn-nodejs-basics` and `learn-rust-basics`
+are independent apps. They follow the same **lesson format** and **history
+format** so they can later merge into one multi-language tutor without losing
+any learning history. Keep this file identical in all four repos; change it in
+all of them or none.
 
 ## 1. Lesson format
 
@@ -112,6 +113,25 @@ boxes fade out; arrows (replaced per step) draw themselves. Arrow states: `ok`,
 Both apps' tests validate every visual (regions, arrows and lines refer to
 things that exist) and run each scenario's `check` for real, so a visual can
 never claim output or a compiler error that isn't true.
+
+**Anatomy.** A ```anatomy block (JSON) takes one piece of code apart token by
+token, for the bedrock lessons ("what does `fn` mean?"). The code is shown with
+each part clickable; ← → or Back / Next walk through the parts, and the panel
+shows what the part is, what it means, and the Java equivalent.
+
+```
+{ "title": "Anatomy of a Rust program", "intro": "…",
+  "code": "fn main() {\n    println!(\"Hi\");\n}",
+  "parts": [ { "text": "fn", "kind": "keyword",
+               "say": "Starts a function definition.",
+               "java": "No keyword: a method is recognised by its return type." },
+             … ] }
+```
+
+Parts are found in the code in order; text between them (spaces, punctuation
+you don't explain) stays plain. Kinds: `keyword`, `name`, `type`, `macro`,
+`literal`, `symbol`, `operator` (each has its own colour). Both apps' tests
+check that every part is found, in order, and has a `say`.
 
 `run` blocks are editable and run with `POST /api/snippet` (Node: an ES
 module; Rust: the body of `fn main` unless it defines one). In `predict`

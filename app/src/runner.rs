@@ -249,8 +249,10 @@ pub fn parse_tests(stdout: &str) -> Vec<TestResult> {
     }
     flush(&current, &mut buf, &mut tests);
 
+    // "tests::says_hello" (unit test) or "says_hello" (tests/*.rs) → "says hello".
     for t in &mut tests {
-        if let Some(short) = t.name.strip_prefix("tests::") {
+        let short = t.name.strip_prefix("tests::").unwrap_or(&t.name);
+        if !short.contains("::") {
             t.name = short.replace('_', " ");
         }
     }

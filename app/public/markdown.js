@@ -34,6 +34,9 @@
         if (lang === 'visual') {
           // A step-through visualization (JSON); visual.js turns it into an animated scene.
           out.push('<div class="visual" data-spec="' + esc(encodeURIComponent(text)) + '"></div>');
+        } else if (lang === 'anatomy') {
+          // One piece of code taken apart token by token (JSON); visual.js makes it explorable.
+          out.push('<div class="anatomy" data-spec="' + esc(encodeURIComponent(text)) + '"></div>');
         } else if (lang === 'run') {
           // An editable example the learner can run; app.js turns it into a widget.
           out.push('<div class="try" data-code="' + esc(encodeURIComponent(text)) + '"></div>');

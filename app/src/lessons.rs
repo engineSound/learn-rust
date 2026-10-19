@@ -181,6 +181,40 @@ pub fn visual_problems(spec: &Json) -> Vec<String> {
 }
 
 #[cfg(test)]
+const ANATOMY_KINDS: [&str; 7] = ["keyword", "name", "type", "macro", "literal", "symbol", "operator"];
+
+/// Problems with an ```anatomy spec: each part must be found in the code, in order, and be explained.
+#[cfg(test)]
+pub fn anatomy_problems(spec: &Json) -> Vec<String> {
+    let str_of = |j: &Json, k: &str| j.get(k).and_then(Json::as_str).unwrap_or("").to_string();
+    let code = str_of(spec, "code");
+    if code.is_empty() {
+        return vec!["an anatomy needs \"code\"".into()];
+    }
+    let parts = spec.get("parts").map(Json::as_array).unwrap_or(&[]);
+    if parts.is_empty() {
+        return vec!["an anatomy needs \"parts\"".into()];
+    }
+    let mut problems = Vec::new();
+    let mut at = 0;
+    for (i, p) in parts.iter().enumerate() {
+        let text = str_of(p, "text");
+        let place = format!("part {} ({})", i + 1, Json::str(text.clone()).to_string());
+        match code[at..].find(&text).filter(|_| !text.is_empty()) {
+            Some(found) => at += found + text.len(),
+            None => problems.push(format!("{place} is not in the code after the previous part")),
+        }
+        if str_of(p, "say").is_empty() {
+            problems.push(format!("{place} needs \"say\""));
+        }
+        if !ANATOMY_KINDS.contains(&str_of(p, "kind").as_str()) {
+            problems.push(format!("{place}: kind must be one of {}", ANATOMY_KINDS.join(", ")));
+        }
+    }
+    problems
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -255,6 +289,19 @@ mod tests {
         assert!(count >= 10, "expected examples in the lessons, found {count}");
     }
 
+    #[test]
+    fn every_anatomy_block_points_at_real_code_in_order() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lessons");
+        for l in list(&dir) {
+            for block in l.body.split("```anatomy\n").skip(1) {
+                let spec = crate::json::parse(block.split("\n```").next().unwrap()).unwrap_or_else(|e| panic!("{}: bad anatomy JSON: {e}", l.slug));
+                assert_eq!(anatomy_problems(&spec), Vec::<String>::new(), "{}", l.slug);
+            }
+        }
+        let swapped = crate::json::parse(r#"{"code":"fn main() {}","parts":[{"text":"main","kind":"name","say":"x"},{"text":"fn","kind":"keyword","say":"y"}]}"#).unwrap();
+        assert_eq!(anatomy_problems(&swapped), vec!["part 2 (\"fn\") is not in the code after the previous part".to_string()]);
+    }
+
     /// Every ```predict answer is one of its options and exactly what the code prints.
     #[test]
     fn every_quick_check_answer_is_what_the_code_prints() {
@@ -270,8 +317,16 @@ mod tests {
                 let answer = field("answer");
                 assert!(field("options").split('|').any(|o| o.trim() == answer), "{}: the answer must be one of the options", l.slug);
                 let r = crate::runner::run_snippet(code, &data).unwrap();
-                let out = r.get("output").and_then(Json::as_str).unwrap_or("").to_string();
-                assert_eq!(flat(&out), flat(&answer), "{}: the quick check claims different output", l.slug);
+                if answer.starts_with("doesn't compile") || answer.starts_with("panics") {
+                    // "doesn't compile (E0384)": it must fail, with that error code if one is named.
+                    assert_eq!(r.get("ok").and_then(Json::as_bool), Some(false), "{}: the quick check says it fails, but it runs", l.slug);
+                    for code in answer.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| w.len() == 5 && w.starts_with('E')) {
+                        assert!(r.to_string().contains(code), "{}: expected {code}, got {}", l.slug, r.to_string());
+                    }
+                } else {
+                    let out = r.get("output").and_then(Json::as_str).unwrap_or("").to_string();
+                    assert_eq!(flat(&out), flat(&answer), "{}: the quick check claims different output", l.slug);
+                }
                 count += 1;
             }
         }

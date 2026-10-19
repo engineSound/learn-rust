@@ -1,5 +1,5 @@
-// Step-through visualizations for lessons (```visual blocks; format in docs/SHARED-FORMAT.md, section 1).
-// Shared by learn-nodejs and learn-rust. No dependencies.
+// Step-through visualizations for lessons (```visual and ```anatomy blocks; format in
+// docs/SHARED-FORMAT.md, section 1). Shared byte-for-byte by the learn-* repos. No dependencies.
 //
 // A visual has scenarios; a scenario has code, regions (columns) and steps. Each step
 // changes the scene: boxes are set/updated by id (`set`), removed (`drop`), arrows are
@@ -258,8 +258,71 @@
     setScenario(0);
   }
 
-  /** Turn every .visual placeholder inside `root` into a live visualization. */
+  // ---------- anatomy: one piece of code, token by token ----------
+
+  /** Where each part sits in the code: parts are found in order; text between them stays plain. */
+  function anatomySpans(spec) {
+    var code = String(spec.code || ''), at = 0;
+    return (spec.parts || []).map(function (p) {
+      var i = code.indexOf(p.text, at);
+      if (i < 0 || !p.text) return null;
+      at = i + p.text.length;
+      return { start: i, end: at };
+    });
+  }
+
+  function buildAnatomy(el, spec) {
+    var code = String(spec.code || ''), parts = spec.parts || [], spans = anatomySpans(spec);
+    var html = '', at = 0;
+    parts.forEach(function (p, i) {
+      var s = spans[i];
+      if (!s) return;
+      html += esc(code.slice(at, s.start)) + '<button type="button" class="an-tok an-' + esc(p.kind || 'symbol') + '" data-i="' + i + '">' + esc(p.text) + '</button>';
+      at = s.end;
+    });
+    html += esc(code.slice(at));
+    el.innerHTML =
+      (spec.title ? '<div class="vz-head"><h3>' + esc(spec.title) + '</h3>' + (spec.intro ? '<p>' + inline(spec.intro) + '</p>' : '') + '</div>' : '') +
+      '<pre class="an-code">' + html + '</pre>' +
+      '<div class="an-detail" aria-live="polite"></div>' +
+      '<div class="vz-controls"><button type="button" class="vz-btn" data-act="prev">← Back</button>' +
+      '<button type="button" class="vz-btn" data-act="next">Next →</button><span class="an-count"></span></div>';
+    el.tabIndex = 0;
+    var cur = 0, toks = el.querySelectorAll('.an-tok');
+    function show(i) {
+      cur = Math.max(0, Math.min(parts.length - 1, i));
+      var p = parts[cur];
+      Array.prototype.forEach.call(toks, function (t) { t.classList.toggle('on', +t.getAttribute('data-i') === cur); });
+      el.querySelector('.an-detail').innerHTML =
+        '<div class="an-what"><code class="an-big an-' + esc(p.kind || 'symbol') + '">' + esc(p.text) + '</code><span class="an-kind">' + esc(p.kind || 'symbol') + '</span></div>' +
+        '<p class="an-say">' + inline(p.say) + '</p>' +
+        (p.java ? '<p class="an-java"><b>Java:</b> ' + inline(p.java) + '</p>' : '');
+      el.querySelector('[data-act="prev"]').disabled = cur === 0;
+      el.querySelector('[data-act="next"]').disabled = cur === parts.length - 1;
+      el.querySelector('.an-count').textContent = (cur + 1) + ' / ' + parts.length;
+    }
+    el.addEventListener('click', function (e) {
+      var t = e.target.closest('[data-i], [data-act]');
+      if (!t) return;
+      if (t.hasAttribute('data-i')) show(+t.getAttribute('data-i'));
+      else show(cur + (t.getAttribute('data-act') === 'next' ? 1 : -1));
+    });
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowRight') { show(cur + 1); e.preventDefault(); }
+      if (e.key === 'ArrowLeft') { show(cur - 1); e.preventDefault(); }
+    });
+    if (parts.length) show(0);
+  }
+
+  /** Turn every .visual and .anatomy placeholder inside `root` into a live visualization. */
   window.hydrateVisuals = function (root) {
+    Array.prototype.forEach.call(root.querySelectorAll('.anatomy[data-spec]'), function (el) {
+      var spec;
+      try { spec = JSON.parse(decodeURIComponent(el.getAttribute('data-spec'))); }
+      catch (e) { el.innerHTML = '<p class="vz-broken">This anatomy could not be read: ' + esc(e.message) + '</p>'; return; }
+      el.removeAttribute('data-spec');
+      buildAnatomy(el, spec);
+    });
     Array.prototype.forEach.call(root.querySelectorAll('.visual[data-spec]'), function (el) {
       var spec;
       try { spec = JSON.parse(decodeURIComponent(el.getAttribute('data-spec'))); }
@@ -269,4 +332,5 @@
     });
   };
   window.visualSceneAt = sceneAt; // for tests and debugging
+  window.anatomySpans = anatomySpans;
 })();

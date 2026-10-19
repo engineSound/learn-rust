@@ -579,7 +579,9 @@
     state.tutor = info.tutor || state.tutor;
     info.trackName = info.track === 'rust' ? 'Rust' : 'Node.js';
     document.title = info.title;
-    $('track-name').textContent = info.trackName;
+    // "Rust Lab" → <strong>Rust</strong> Lab; "Node.js Basics" → <strong>Node.js</strong> Basics
+    var words = info.title.split(' ');
+    $('brand').innerHTML = '<strong>' + esc(words.slice(0, -1).join(' ') || info.title) + '</strong> ' + esc(words.length > 1 ? words[words.length - 1] : '');
     if (info.accent) document.documentElement.style.setProperty('--accent', info.accent);
     return refresh();
   }).then(route).catch(function (e) {
